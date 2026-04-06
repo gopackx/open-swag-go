@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}} - API Documentation</title>
+    <style>
+        body { margin: 0; padding: 0; }
+        {{CUSTOM_CSS}}
+    </style>
+</head>
+<body>
+    <script id="api-reference"></script>
+    <script>
+        // Build spec URL with query params (for API key auth)
+        var specUrl = '{{SPEC_URL}}';
+        if (window.location.search) {
+            specUrl += window.location.search;
+        }
+        
+        var configuration = {{CONFIG}};
+        var apiRef = document.getElementById('api-reference');
+        apiRef.dataset.url = specUrl;
+        apiRef.dataset.configuration = JSON.stringify(configuration);
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</body>
+</html>
