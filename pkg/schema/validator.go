@@ -26,7 +26,7 @@ func NewValidator() *Validator {
 func (v *Validator) Validate(schema *Schema) []ValidationError {
 	errors := []ValidationError{}
 
-	if schema.Type == "" && schema.Ref == "" {
+	if schema.Type == "" && schema.Ref == "" && !isEmptySchema(schema) {
 		errors = append(errors, ValidationError{
 			Path:    "type",
 			Message: "type or $ref is required",
@@ -53,6 +53,13 @@ func (v *Validator) Validate(schema *Schema) []ValidationError {
 	}
 
 	return errors
+}
+
+// isEmptySchema checks if a schema is intentionally empty (any type)
+func isEmptySchema(schema *Schema) bool {
+	return schema.Type == "" && schema.Ref == "" &&
+		schema.Properties == nil && schema.Items == nil &&
+		schema.AllOf == nil && schema.OneOf == nil && schema.AnyOf == nil
 }
 
 // ValidateValue validates a value against a schema

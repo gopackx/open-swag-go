@@ -8,21 +8,32 @@ import (
 
 // Schema represents a JSON Schema
 type Schema struct {
-	Type        string             `json:"type,omitempty"`
-	Format      string             `json:"format,omitempty"`
-	Description string             `json:"description,omitempty"`
-	Properties  map[string]*Schema `json:"properties,omitempty"`
-	Required    []string           `json:"required,omitempty"`
-	Items       *Schema            `json:"items,omitempty"`
-	Enum        []interface{}      `json:"enum,omitempty"`
-	Example     interface{}        `json:"example,omitempty"`
-	Default     interface{}        `json:"default,omitempty"`
-	Minimum     *float64           `json:"minimum,omitempty"`
-	Maximum     *float64           `json:"maximum,omitempty"`
-	MinLength   *int               `json:"minLength,omitempty"`
-	MaxLength   *int               `json:"maxLength,omitempty"`
-	Pattern     string             `json:"pattern,omitempty"`
-	Ref         string             `json:"$ref,omitempty"`
+	Type                 string             `json:"type,omitempty"`
+	Format               string             `json:"format,omitempty"`
+	Description          string             `json:"description,omitempty"`
+	Properties           map[string]*Schema `json:"properties,omitempty"`
+	Required             []string           `json:"required,omitempty"`
+	Items                *Schema            `json:"items,omitempty"`
+	AdditionalProperties *Schema            `json:"additionalProperties,omitempty"`
+	Enum                 []interface{}      `json:"enum,omitempty"`
+	Example              interface{}        `json:"example,omitempty"`
+	Default              interface{}        `json:"default,omitempty"`
+	Minimum              *float64           `json:"minimum,omitempty"`
+	Maximum              *float64           `json:"maximum,omitempty"`
+	MinLength            *int               `json:"minLength,omitempty"`
+	MaxLength            *int               `json:"maxLength,omitempty"`
+	Pattern              string             `json:"pattern,omitempty"`
+	MinItems             *int               `json:"minItems,omitempty"`
+	MaxItems             *int               `json:"maxItems,omitempty"`
+	UniqueItems          bool               `json:"uniqueItems,omitempty"`
+	Ref                  string             `json:"$ref,omitempty"`
+	Nullable             bool               `json:"nullable,omitempty"`
+	ReadOnly             bool               `json:"readOnly,omitempty"`
+	WriteOnly            bool               `json:"writeOnly,omitempty"`
+	Deprecated           bool               `json:"deprecated,omitempty"`
+	AllOf                []*Schema          `json:"allOf,omitempty"`
+	OneOf                []*Schema          `json:"oneOf,omitempty"`
+	AnyOf                []*Schema          `json:"anyOf,omitempty"`
 }
 
 // FromType converts a Go type to JSON Schema
@@ -51,6 +62,21 @@ func fromReflectType(t reflect.Type) *Schema {
 	// Handle time.Time specially
 	if t == reflect.TypeOf(time.Time{}) {
 		return &Schema{Type: "string", Format: "date-time", Example: "2024-01-01T00:00:00Z"}
+	}
+
+	// Handle time.Duration
+	if t == reflect.TypeOf(time.Duration(0)) {
+		return &Schema{Type: "string", Format: "duration", Example: "1h30m"}
+	}
+
+	// Handle []byte
+	if t == reflect.TypeOf([]byte{}) {
+		return &Schema{Type: "string", Format: "byte"}
+	}
+
+	// Handle uuid.UUID (array of 16 uint8 named UUID)
+	if t.Kind() == reflect.Array && t.Len() == 16 && t.Elem().Kind() == reflect.Uint8 && t.Name() == "UUID" {
+		return &Schema{Type: "string", Format: "uuid", Example: "550e8400-e29b-41d4-a716-446655440000"}
 	}
 
 	switch t.Kind() {
@@ -85,10 +111,11 @@ func fromReflectType(t reflect.Type) *Schema {
 		return fromStruct(t)
 	case reflect.Map:
 		return &Schema{
-			Type: "object",
+			Type:                 "object",
+			AdditionalProperties: fromReflectType(t.Elem()),
 		}
 	case reflect.Interface:
-		return &Schema{Type: "object"}
+		return &Schema{} // empty schema = accepts any type
 	default:
 		return &Schema{Type: "string", Example: "string"}
 	}
@@ -108,13 +135,42 @@ func fromStruct(t reflect.Type) *Schema {
 			continue
 		}
 
+		// Handle embedded (anonymous) structs — flatten properties into parent
+		if field.Anonymous {
+			ft := field.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				embedded := fromReflectType(ft)
+				if embedded.Properties != nil {
+					for k, v := range embedded.Properties {
+						schema.Properties[k] = v
+					}
+				}
+				if embedded.Required != nil {
+					schema.Required = append(schema.Required, embedded.Required...)
+				}
+				continue
+			}
+		}
+
 		// Get field name from json tag first, then form tag
 		jsonTag := field.Tag.Get("json")
 		if jsonTag == "-" {
 			continue
 		}
 
-		name := strings.Split(jsonTag, ",")[0]
+		jsonParts := strings.Split(jsonTag, ",")
+		name := jsonParts[0]
+		hasOmitempty := false
+		for _, part := range jsonParts[1:] {
+			if part == "omitempty" {
+				hasOmitempty = true
+				break
+			}
+		}
+
 		if name == "" {
 			// Fallback to form tag
 			formTag := field.Tag.Get("form")
@@ -134,8 +190,8 @@ func fromStruct(t reflect.Type) *Schema {
 
 		schema.Properties[name] = fieldSchema
 
-		// Check if required
-		if IsRequired(field) {
+		// Check if required — fields with omitempty should not be required
+		if IsRequired(field) && !hasOmitempty {
 			schema.Required = append(schema.Required, name)
 		}
 	}

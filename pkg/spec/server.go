@@ -1,5 +1,7 @@
 package spec
 
+import "strconv"
+
 // Server represents an OpenAPI server object
 type Server struct {
 	URL         string                    `json:"url"`
@@ -59,7 +61,7 @@ var CommonServers = struct {
 }{
 	Localhost: func(port int) Server {
 		return Server{
-			URL:         "http://localhost:" + string(rune(port)),
+			URL:         "http://localhost:" + strconv.Itoa(port),
 			Description: "Local development server",
 		}
 	},
@@ -80,7 +82,7 @@ var CommonServers = struct {
 // LocalhostServer creates a localhost server with the given port
 func LocalhostServer(port int) Server {
 	return Server{
-		URL:         "http://localhost:" + portToString(port),
+		URL:         "http://localhost:" + strconv.Itoa(port),
 		Description: "Local development server",
 	}
 }
@@ -104,14 +106,3 @@ func StagingServer(url string) Server {
 	}
 }
 
-func portToString(port int) string {
-	result := ""
-	if port == 0 {
-		return "0"
-	}
-	for port > 0 {
-		result = string(rune('0'+port%10)) + result
-		port /= 10
-	}
-	return result
-}
