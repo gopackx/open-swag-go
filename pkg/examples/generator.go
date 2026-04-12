@@ -1,7 +1,9 @@
 package examples
 
 import (
+	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -106,9 +108,9 @@ func (g *Generator) generateFromStruct(t reflect.Type) map[string]interface{} {
 			continue
 		}
 
-		// Check for explicit example tag first
+		// Check for explicit example tag first, with type coercion
 		if example := field.Tag.Get("example"); example != "" {
-			result[name] = example
+			result[name] = convertExampleToType(example, field.Type)
 			continue
 		}
 
@@ -214,6 +216,44 @@ func (g *Generator) guessFromFieldName(name string, t reflect.Type) interface{} 
 	}
 
 	return nil
+}
+
+// convertExampleToType converts a string example to the appropriate Go type
+func convertExampleToType(example string, t reflect.Type) interface{} {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if v, err := strconv.ParseInt(example, 10, 64); err == nil {
+			return v
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if v, err := strconv.ParseUint(example, 10, 64); err == nil {
+			return v
+		}
+	case reflect.Float32, reflect.Float64:
+		if v, err := strconv.ParseFloat(example, 64); err == nil {
+			return v
+		}
+	case reflect.Bool:
+		if v, err := strconv.ParseBool(example); err == nil {
+			return v
+		}
+	case reflect.Slice, reflect.Array:
+		var arr []interface{}
+		if err := json.Unmarshal([]byte(example), &arr); err == nil {
+			return arr
+		}
+	case reflect.Map:
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(example), &m); err == nil {
+			return m
+		}
+	}
+
+	return example
 }
 
 // GenerateJSON generates example and returns as map suitable for JSON

@@ -3,6 +3,7 @@ package openswag
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -299,6 +300,11 @@ func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
 		if ep.RequestBody.Schema != nil {
 			schemaResult := schema.FromType(ep.RequestBody.Schema)
 			s = convertSchema(schemaResult)
+
+			// Generate example from the struct for the request body
+			if s != nil && s.Example == nil {
+				s.Example = generateExample(ep.RequestBody.Schema)
+			}
 		}
 
 		rb := spec.NewRequestBody(ep.RequestBody.Description, ep.RequestBody.Required).
@@ -351,16 +357,27 @@ func (d *Docs) buildParamsFromStruct(v interface{}, location string) []*spec.Par
 			continue
 		}
 
-		// Get parameter name from tags (form, query, param, path, json)
-		name := field.Tag.Get("form")
-		if name == "" {
+		// Get parameter name from tags — prefer location-specific tag first
+		var name string
+		switch location {
+		case "query":
 			name = field.Tag.Get("query")
+			if name == "" {
+				name = field.Tag.Get("form")
+			}
+		case "path":
+			name = field.Tag.Get("path")
+			if name == "" {
+				name = field.Tag.Get("param")
+			}
+		default:
+			name = field.Tag.Get("form")
+			if name == "" {
+				name = field.Tag.Get("query")
+			}
 		}
 		if name == "" {
 			name = field.Tag.Get("param")
-		}
-		if name == "" {
-			name = field.Tag.Get("path")
 		}
 		if name == "" {
 			name = field.Tag.Get("json")
@@ -395,9 +412,9 @@ func (d *Docs) buildParamsFromStruct(v interface{}, location string) []*spec.Par
 			p.SetRequired(true)
 		}
 
-		// Check for example tag
+		// Check for example tag with type coercion
 		if example := field.Tag.Get("example"); example != "" {
-			p.WithExample(example)
+			p.WithExample(schema.ConvertExampleToType(example, field.Type))
 		}
 
 		params = append(params, p)
@@ -450,12 +467,27 @@ func convertSchema(s *schema.Schema) *spec.Schema {
 		Maximum:     s.Maximum,
 		MinLength:   s.MinLength,
 		MaxLength:   s.MaxLength,
+		Ref:         s.Ref,
+		Nullable:    s.Nullable,
+		ReadOnly:    s.ReadOnly,
+		WriteOnly:   s.WriteOnly,
+		Deprecated:  s.Deprecated,
+		MinItems:    s.MinItems,
+		MaxItems:    s.MaxItems,
+		UniqueItems: s.UniqueItems,
 	}
 
+	// AdditionalProperties
+	if s.AdditionalProperties != nil {
+		result.AdditionalProperties = convertSchema(s.AdditionalProperties)
+	}
+
+	// Items (array)
 	if s.Items != nil {
 		result.Items = convertSchema(s.Items)
 	}
 
+	// Properties (object)
 	if len(s.Properties) > 0 {
 		result.Properties = make(map[string]*spec.Schema)
 		for k, v := range s.Properties {
@@ -463,19 +495,67 @@ func convertSchema(s *schema.Schema) *spec.Schema {
 		}
 	}
 
+	// Composition
+	for _, sub := range s.AllOf {
+		result.AllOf = append(result.AllOf, convertSchema(sub))
+	}
+	for _, sub := range s.OneOf {
+		result.OneOf = append(result.OneOf, convertSchema(sub))
+	}
+	for _, sub := range s.AnyOf {
+		result.AnyOf = append(result.AnyOf, convertSchema(sub))
+	}
+
+	return result
+}
+
+// generateExample builds an example map from a struct using field tags and type defaults
+func generateExample(v interface{}) map[string]interface{} {
+	t := reflect.TypeOf(v)
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+		name := strings.Split(jsonTag, ",")[0]
+		if name == "" {
+			name = field.Name
+		}
+
+		if example := field.Tag.Get("example"); example != "" {
+			result[name] = schema.ConvertExampleToType(example, field.Type)
+		} else {
+			s := schema.FromReflectType(field.Type)
+			if s.Example != nil {
+				result[name] = s.Example
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
 	return result
 }
 
 func intToString(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	result := ""
-	for n > 0 {
-		result = string(rune('0'+n%10)) + result
-		n /= 10
-	}
-	return result
+	return strconv.Itoa(n)
 }
 
 // SpecJSON returns the OpenAPI spec as JSON
