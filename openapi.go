@@ -300,11 +300,6 @@ func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
 		if ep.RequestBody.Schema != nil {
 			schemaResult := schema.FromType(ep.RequestBody.Schema)
 			s = convertSchema(schemaResult)
-
-			// Generate example from the struct for the request body
-			if s != nil && s.Example == nil {
-				s.Example = generateExample(ep.RequestBody.Schema)
-			}
 		}
 
 		rb := spec.NewRequestBody(ep.RequestBody.Description, ep.RequestBody.Required).
@@ -506,51 +501,6 @@ func convertSchema(s *schema.Schema) *spec.Schema {
 		result.AnyOf = append(result.AnyOf, convertSchema(sub))
 	}
 
-	return result
-}
-
-// generateExample builds an example map from a struct using field tags and type defaults
-func generateExample(v interface{}) map[string]interface{} {
-	t := reflect.TypeOf(v)
-	if t == nil {
-		return nil
-	}
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return nil
-	}
-
-	result := make(map[string]interface{})
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "-" {
-			continue
-		}
-		name := strings.Split(jsonTag, ",")[0]
-		if name == "" {
-			name = field.Name
-		}
-
-		if example := field.Tag.Get("example"); example != "" {
-			result[name] = schema.ConvertExampleToType(example, field.Type)
-		} else {
-			s := schema.FromReflectType(field.Type)
-			if s.Example != nil {
-				result[name] = s.Example
-			}
-		}
-	}
-
-	if len(result) == 0 {
-		return nil
-	}
 	return result
 }
 

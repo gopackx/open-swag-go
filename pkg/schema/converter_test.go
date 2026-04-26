@@ -113,8 +113,9 @@ func TestFromType_JSON(t *testing.T) {
 		t.Errorf("grant_type.type should be 'string', got %v", grantType["type"])
 	}
 
-	if grantType["example"] != "string" {
-		t.Errorf("grant_type.example should be 'string', got %v", grantType["example"])
+	// No auto-generated example — only set when user provides example tag
+	if _, hasExample := grantType["example"]; hasExample {
+		t.Errorf("grant_type should not have auto-generated example, got %v", grantType["example"])
 	}
 }
 
@@ -129,20 +130,20 @@ func TestFromType_Examples(t *testing.T) {
 
 	schema := FromType(TestStruct{})
 
-	// Check default examples
-	if schema.Properties["name"].Example != "string" {
-		t.Errorf("name.example should be 'string', got %v", schema.Properties["name"].Example)
+	// Untagged fields should NOT have auto-generated examples
+	if schema.Properties["name"].Example != nil {
+		t.Errorf("name.example should be nil (no tag), got %v", schema.Properties["name"].Example)
 	}
-	if schema.Properties["age"].Example != 0 {
-		t.Errorf("age.example should be 0, got %v", schema.Properties["age"].Example)
+	if schema.Properties["age"].Example != nil {
+		t.Errorf("age.example should be nil (no tag), got %v", schema.Properties["age"].Example)
 	}
-	if schema.Properties["score"].Example != 0.0 {
-		t.Errorf("score.example should be 0.0, got %v", schema.Properties["score"].Example)
+	if schema.Properties["score"].Example != nil {
+		t.Errorf("score.example should be nil (no tag), got %v", schema.Properties["score"].Example)
 	}
-	if schema.Properties["active"].Example != false {
-		t.Errorf("active.example should be false, got %v", schema.Properties["active"].Example)
+	if schema.Properties["active"].Example != nil {
+		t.Errorf("active.example should be nil (no tag), got %v", schema.Properties["active"].Example)
 	}
-	// Check custom example from tag
+	// Tagged field should have its example value
 	if schema.Properties["custom"].Example != "my-custom-value" {
 		t.Errorf("custom.example should be 'my-custom-value', got %v", schema.Properties["custom"].Example)
 	}

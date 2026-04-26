@@ -56,6 +56,11 @@ func parseSwaggerTag(tag string, schema *Schema) {
 // ConvertExampleToType converts a string example value to the appropriate Go type
 // based on the reflect.Type of the field.
 func ConvertExampleToType(example string, t reflect.Type) interface{} {
+	// Literal "null" — always serialize as JSON null, regardless of field type
+	if example == "null" {
+		return json.RawMessage("null")
+	}
+
 	// Unwrap pointer
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()

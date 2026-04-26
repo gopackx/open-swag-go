@@ -61,12 +61,12 @@ func fromReflectType(t reflect.Type) *Schema {
 
 	// Handle time.Time specially
 	if t == reflect.TypeOf(time.Time{}) {
-		return &Schema{Type: "string", Format: "date-time", Example: "2024-01-01T00:00:00Z"}
+		return &Schema{Type: "string", Format: "date-time"}
 	}
 
 	// Handle time.Duration
 	if t == reflect.TypeOf(time.Duration(0)) {
-		return &Schema{Type: "string", Format: "duration", Example: "1h30m"}
+		return &Schema{Type: "string", Format: "duration"}
 	}
 
 	// Handle []byte
@@ -76,32 +76,30 @@ func fromReflectType(t reflect.Type) *Schema {
 
 	// Handle uuid.UUID (array of 16 uint8 named UUID)
 	if t.Kind() == reflect.Array && t.Len() == 16 && t.Elem().Kind() == reflect.Uint8 && t.Name() == "UUID" {
-		return &Schema{Type: "string", Format: "uuid", Example: "550e8400-e29b-41d4-a716-446655440000"}
+		return &Schema{Type: "string", Format: "uuid"}
 	}
 
 	switch t.Kind() {
 	case reflect.String:
-		return &Schema{Type: "string", Example: "string"}
-	case reflect.Int:
-		return &Schema{Type: "integer", Example: 0}
-	case reflect.Int8, reflect.Int16:
-		return &Schema{Type: "integer", Example: 0}
+		return &Schema{Type: "string"}
+	case reflect.Int, reflect.Int8, reflect.Int16:
+		return &Schema{Type: "integer"}
 	case reflect.Int32:
-		return &Schema{Type: "integer", Format: "int32", Example: 0}
+		return &Schema{Type: "integer", Format: "int32"}
 	case reflect.Int64:
-		return &Schema{Type: "integer", Format: "int64", Example: 0}
+		return &Schema{Type: "integer", Format: "int64"}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16:
-		return &Schema{Type: "integer", Example: 0}
+		return &Schema{Type: "integer"}
 	case reflect.Uint32:
-		return &Schema{Type: "integer", Format: "int32", Example: 0}
+		return &Schema{Type: "integer", Format: "int32"}
 	case reflect.Uint64:
-		return &Schema{Type: "integer", Format: "int64", Example: 0}
+		return &Schema{Type: "integer", Format: "int64"}
 	case reflect.Float32:
-		return &Schema{Type: "number", Format: "float", Example: 0.0}
+		return &Schema{Type: "number", Format: "float"}
 	case reflect.Float64:
-		return &Schema{Type: "number", Format: "double", Example: 0.0}
+		return &Schema{Type: "number", Format: "double"}
 	case reflect.Bool:
-		return &Schema{Type: "boolean", Example: false}
+		return &Schema{Type: "boolean"}
 	case reflect.Slice, reflect.Array:
 		return &Schema{
 			Type:  "array",
@@ -117,7 +115,7 @@ func fromReflectType(t reflect.Type) *Schema {
 	case reflect.Interface:
 		return &Schema{} // empty schema = accepts any type
 	default:
-		return &Schema{Type: "string", Example: "string"}
+		return &Schema{Type: "string"}
 	}
 }
 
