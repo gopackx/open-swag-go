@@ -5,6 +5,8 @@
 *.so
 *.dylib
 
+.claude
+
 # Test binary
 *.test
 

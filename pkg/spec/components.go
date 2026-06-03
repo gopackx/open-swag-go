@@ -241,6 +241,16 @@ func NewRequestBody(description string, required bool) *RequestBody {
 
 // WithJSONContent adds JSON content to a request body
 func (rb *RequestBody) WithJSONContent(schema *Schema) *RequestBody {
-	rb.Content["application/json"] = &MediaType{Schema: schema}
+	return rb.WithContent("application/json", schema)
+}
+
+// WithContent adds a media type entry to the request body. Use this to set
+// alternative content types such as multipart/form-data or
+// application/x-www-form-urlencoded.
+func (rb *RequestBody) WithContent(mediaType string, schema *Schema) *RequestBody {
+	if rb.Content == nil {
+		rb.Content = make(map[string]*MediaType)
+	}
+	rb.Content[mediaType] = &MediaType{Schema: schema}
 	return rb
 }

@@ -1,12 +1,52 @@
 package openswag
 
+import "github.com/gopackx/open-swag-go/pkg/spec"
+
 // Config is the main configuration for the documentation
 type Config struct {
-	Info     Info      `json:"info"`
-	Servers  []Server  `json:"servers,omitempty"`
-	Tags     []Tag     `json:"tags,omitempty"`
-	UI       UIConfig  `json:"ui"`
-	DocsAuth *DocsAuth `json:"docsAuth,omitempty"`
+	Info     Info       `json:"info"`
+	Servers  []Server   `json:"servers,omitempty"`
+	Tags     []Tag      `json:"tags,omitempty"`
+	UI       UIConfig   `json:"ui"`
+	Auth     AuthConfig `json:"auth"`
+	DocsAuth *DocsAuth  `json:"docsAuth,omitempty"`
+}
+
+// AuthConfig configures the security schemes exposed by the generated spec.
+type AuthConfig struct {
+	// PersistCredentials keeps tokens/keys entered in the try-it UI between
+	// page reloads. Stored client-side; do not enable for production docs
+	// served to untrusted users.
+	PersistCredentials bool `json:"persistCredentials,omitempty"`
+	// Schemes is the list of security schemes that will be advertised under
+	// components.securitySchemes. Names used here can be referenced from
+	// Endpoint.Security. If a name overlaps with one of the Security* constants
+	// the user-supplied scheme wins.
+	Schemes []AuthScheme `json:"schemes,omitempty"`
+}
+
+// AuthScheme is a single security scheme entry. Use BearerAuth, APIKeyAuth,
+// BasicAuth, or CookieAuth to build one without remembering the OpenAPI
+// keywords.
+type AuthScheme struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Scheme       string `json:"scheme,omitempty"`
+	BearerFormat string `json:"bearerFormat,omitempty"`
+	In           string `json:"in,omitempty"`
+	ParamName    string `json:"paramName,omitempty"`
+	Description  string `json:"description,omitempty"`
+}
+
+func (a AuthScheme) toSpec() *spec.SecurityScheme {
+	return &spec.SecurityScheme{
+		Type:         a.Type,
+		Scheme:       a.Scheme,
+		BearerFormat: a.BearerFormat,
+		In:           a.In,
+		Name:         a.ParamName,
+		Description:  a.Description,
+	}
 }
 
 // Predefined security scheme names for use in Endpoint.Security
@@ -15,6 +55,7 @@ const (
 	SecurityBasicAuth   = "basicAuth"   // HTTP Basic auth
 	SecurityApiKey      = "apiKeyAuth"  // API Key in header (X-API-Key)
 	SecurityApiKeyQuery = "apiKeyQuery" // API Key in query param (?api_key=)
+	SecurityCookieAuth  = "cookieAuth"  // Session cookie
 	SecurityOAuth2      = "oauth2"      // OAuth2
 )
 

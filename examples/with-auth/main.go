@@ -6,8 +6,6 @@ import (
 	"net/http"
 
 	openswag "github.com/gopackx/open-swag-go"
-	"github.com/gopackx/open-swag-go/pkg/auth"
-	"github.com/gopackx/open-swag-go/pkg/spec"
 )
 
 type LoginRequest struct {
@@ -48,34 +46,26 @@ func getProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 var LoginDoc = openswag.Endpoint{
-	Method:  "POST",
-	Path:    "/auth/login",
-	Summary: "User login",
-	Tags:    []string{"Auth"},
-	RequestBody: &openswag.RequestBody{
-		Description: "Login credentials",
-		Required:    true,
-		Schema:      LoginRequest{},
-	},
-	Responses: map[int]openswag.Response{
-		200: {Description: "Login successful", Schema: TokenResponse{}},
-		401: {Description: "Invalid credentials", Schema: ErrorResponse{}},
+	Method:      "POST",
+	Path:        "/auth/login",
+	Summary:     "User login",
+	Tags:        []string{"Auth"},
+	RequestBody: openswag.BodyWithDesc("Login credentials", LoginRequest{}),
+	Responses: openswag.Responses{
+		200: openswag.Response("Login successful", TokenResponse{}),
+		401: openswag.Response("Invalid credentials", ErrorResponse{}),
 	},
 }
 
 var RegisterDoc = openswag.Endpoint{
-	Method:  "POST",
-	Path:    "/auth/register",
-	Summary: "User registration",
-	Tags:    []string{"Auth"},
-	RequestBody: &openswag.RequestBody{
-		Description: "Registration data",
-		Required:    true,
-		Schema:      LoginRequest{},
-	},
-	Responses: map[int]openswag.Response{
-		201: {Description: "User created", Schema: UserResponse{}},
-		400: {Description: "Invalid data", Schema: ErrorResponse{}},
+	Method:      "POST",
+	Path:        "/auth/register",
+	Summary:     "User registration",
+	Tags:        []string{"Auth"},
+	RequestBody: openswag.BodyWithDesc("Registration data", LoginRequest{}),
+	Responses: openswag.Responses{
+		201: openswag.Response("User created", UserResponse{}),
+		400: openswag.Response("Invalid data", ErrorResponse{}),
 	},
 }
 
@@ -84,9 +74,9 @@ var ProfileDoc = openswag.Endpoint{
 	Path:     "/users/me",
 	Summary:  "Get current user profile",
 	Tags:     []string{"Users"},
-	Security: []string{"bearerAuth"},
-	Responses: map[int]openswag.Response{
-		200: {Description: "Profile retrieved", Schema: UserResponse{}},
+	Security: []string{openswag.SecurityBearerAuth},
+	Responses: openswag.Responses{
+		200: openswag.Response("Profile retrieved", UserResponse{}),
 	},
 }
 
@@ -109,23 +99,14 @@ func main() {
 			DarkMode:    true,
 			ShowSidebar: true,
 		},
-	})
-
-	bearerScheme := auth.BearerAuth("JWT authentication")
-	apiKeyScheme := auth.APIKeyHeader("X-API-Key", "API key authentication")
-
-	openapi := docs.BuildSpec()
-	openapi.AddSecurityScheme("bearerAuth", &spec.SecurityScheme{
-		Type:         "http",
-		Scheme:       "bearer",
-		BearerFormat: "JWT",
-		Description:  bearerScheme.Description,
-	})
-	openapi.AddSecurityScheme("apiKey", &spec.SecurityScheme{
-		Type:        "apiKey",
-		Name:        apiKeyScheme.Name,
-		In:          string(apiKeyScheme.In),
-		Description: apiKeyScheme.Description,
+		Auth: openswag.AuthConfig{
+			PersistCredentials: true,
+			Schemes: []openswag.AuthScheme{
+				openswag.BearerAuth(openswag.SecurityBearerAuth),
+				openswag.APIKeyAuth("apiKey", "X-API-Key"),
+				openswag.CookieAuth("sessionAuth", "session_id"),
+			},
+		},
 	})
 
 	docs.AddAll(LoginDoc, RegisterDoc, ProfileDoc)

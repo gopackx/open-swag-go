@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // ChangeType represents the type of change
@@ -200,6 +201,39 @@ func (d *Differ) compareOperations(path, method string, oldOp, newOp map[string]
 		}
 	}
 
+	// Compare field types in the request body — changing the JSON type or
+	// format of an existing field breaks client deserialization. Tagged with
+	// BreakingTypeChanged in the breaking-rule catalog.
+	oldFields := getBodyFieldTypes(oldOp)
+	newFields := getBodyFieldTypes(newOp)
+	for name, oldType := range oldFields {
+		if newType, exists := newFields[name]; exists && newType != oldType {
+			changes = append(changes, Change{
+				Type:        ChangeModified,
+				Path:        path,
+				Method:      method,
+				Description: fmt.Sprintf("Field '%s' type changed from %s to %s", name, oldType, newType),
+				IsBreaking:  true,
+			})
+		}
+	}
+
+	// Compare parameter types — same rationale as body fields, but for
+	// path/query/header/cookie params.
+	oldParamTypes := getParamTypes(oldOp)
+	newParamTypes := getParamTypes(newOp)
+	for name, oldType := range oldParamTypes {
+		if newType, exists := newParamTypes[name]; exists && newType != oldType {
+			changes = append(changes, Change{
+				Type:        ChangeModified,
+				Path:        path,
+				Method:      method,
+				Description: fmt.Sprintf("Parameter '%s' type changed from %s to %s", name, oldType, newType),
+				IsBreaking:  true,
+			})
+		}
+	}
+
 	// Compare response codes
 	oldResponses := getResponseCodes(oldOp)
 	newResponses := getResponseCodes(newOp)
@@ -364,6 +398,78 @@ func getParameters(op map[string]interface{}) map[string]map[string]interface{} 
 	return result
 }
 
+// getBodyFieldTypes returns a map of request-body property name → "type[/format]".
+// Format is included because changing int32→int64 (same JSON type, different
+// format) still breaks strongly-typed clients.
+func getBodyFieldTypes(op map[string]interface{}) map[string]string {
+	result := make(map[string]string)
+
+	body := getRequestBody(op)
+	if body == nil {
+		return result
+	}
+	content, ok := body["content"].(map[string]interface{})
+	if !ok {
+		return result
+	}
+	for _, mediaType := range content {
+		mt, ok := mediaType.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		schema, ok := mt["schema"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		props, ok := schema["properties"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for name, p := range props {
+			if pm, ok := p.(map[string]interface{}); ok {
+				result[name] = schemaTypeSignature(pm)
+			}
+		}
+		// First media type is enough; multiple media types with diverging
+		// schemas would require per-content-type tracking which is out of
+		// scope here.
+		break
+	}
+	return result
+}
+
+// getParamTypes returns a map of parameter name → "type[/format]".
+func getParamTypes(op map[string]interface{}) map[string]string {
+	result := make(map[string]string)
+	params, ok := op["parameters"].([]interface{})
+	if !ok {
+		return result
+	}
+	for _, p := range params {
+		pm, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := pm["name"].(string)
+		if name == "" {
+			continue
+		}
+		if schema, ok := pm["schema"].(map[string]interface{}); ok {
+			result[name] = schemaTypeSignature(schema)
+		}
+	}
+	return result
+}
+
+func schemaTypeSignature(schema map[string]interface{}) string {
+	t, _ := schema["type"].(string)
+	f, _ := schema["format"].(string)
+	if f != "" {
+		return t + "/" + f
+	}
+	return t
+}
+
 func isParamRequired(param map[string]interface{}) bool {
 	if required, ok := param["required"].(bool); ok {
 		return required
@@ -381,19 +487,26 @@ func contains(slice []string, item string) bool {
 }
 
 func getMigrationGuide(change Change) string {
+	desc := change.Description
 	switch {
-	case change.Description == "Request body removed":
+	case desc == "Request body removed":
 		return "Remove request body from client calls"
-	case change.Description == "Required request body added":
+	case desc == "Required request body added":
 		return "Add required request body to client calls"
-	case contains([]string{"New required field"}, change.Description[:18]):
+	case strings.HasPrefix(desc, "New required field"):
 		return "Add the new required field to request payload"
-	case contains([]string{"Response code"}, change.Description[:13]):
+	case strings.HasPrefix(desc, "Response code"):
 		return "Update client to handle the removed response code"
-	case contains([]string{"Parameter"}, change.Description[:9]):
-		return "Update client to remove usage of the deleted parameter"
-	case contains([]string{"New required parameter"}, change.Description[:21]):
+	case strings.HasPrefix(desc, "New required parameter"):
 		return "Add the new required parameter to client calls"
+	case strings.HasPrefix(desc, "Parameter"):
+		// Either "Parameter 'x' removed" or "Parameter 'x' type changed from..."
+		if strings.Contains(desc, "type changed") {
+			return "Update client field type to match the new schema (regenerate types if you use code generation)"
+		}
+		return "Update client to remove usage of the deleted parameter"
+	case strings.HasPrefix(desc, "Field"):
+		return "Update client field type to match the new schema (regenerate types if you use code generation)"
 	default:
 		return "Review the change and update client code accordingly"
 	}

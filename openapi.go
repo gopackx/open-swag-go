@@ -30,10 +30,13 @@ type Endpoint struct {
 	QueryParams interface{} // Struct with query parameters (uses form/query tags)
 	PathParams  interface{} // Struct with path parameters
 	RequestBody *RequestBody
-	Responses   map[int]Response
+	Responses   Responses
 	Security    []string
 	Deprecated  bool
 }
+
+// Responses maps HTTP status codes to response definitions.
+type Responses = map[int]ResponseSpec
 
 // Parameter represents an API parameter
 type Parameter struct {
@@ -53,8 +56,9 @@ type RequestBody struct {
 	ContentType string
 }
 
-// Response represents an API response
-type Response struct {
+// ResponseSpec represents an API response.
+// Use the Response() helper for the most concise form.
+type ResponseSpec struct {
 	Description string
 	Schema      interface{}
 }
@@ -137,81 +141,114 @@ func (d *Docs) BuildSpec() *spec.OpenAPI {
 	return openapi
 }
 
-// addSecuritySchemes adds predefined security schemes based on endpoint usage
+// addSecuritySchemes wires security schemes into the spec. Resolution order:
+//  1. Schemes explicitly registered via Config.Auth.Schemes (always win).
+//  2. The predefined constants (SecurityBearerAuth, SecurityBasicAuth, etc.)
+//     when an endpoint references them by name.
+//
+// Unknown names that are neither registered nor predefined are skipped — we no
+// longer silently materialise them as http-bearer. This keeps the spec honest:
+// the generated client will see exactly the schemes the user configured.
 func (d *Docs) addSecuritySchemes(openapi *spec.OpenAPI) {
 	usedSchemes := make(map[string]bool)
-
-	// Collect all used security schemes from endpoints
 	for _, ep := range d.endpoints {
 		for _, sec := range ep.Security {
 			usedSchemes[sec] = true
 		}
 	}
 
-	if len(usedSchemes) == 0 {
+	// Always register schemes the user declared — they may be referenced by
+	// AuthConfig alone (e.g. for global Security requirements) without an
+	// endpoint listing them.
+	hasUserSchemes := len(d.config.Auth.Schemes) > 0
+	if len(usedSchemes) == 0 && !hasUserSchemes {
 		return
 	}
 
 	if openapi.Components == nil {
 		openapi.Components = &spec.Components{}
 	}
-	openapi.Components.SecuritySchemes = make(map[string]*spec.SecurityScheme)
+	if openapi.Components.SecuritySchemes == nil {
+		openapi.Components.SecuritySchemes = make(map[string]*spec.SecurityScheme)
+	}
 
-	// Add only the schemes that are actually used
+	// 1. User-supplied schemes take priority.
+	registered := make(map[string]bool)
+	for _, s := range d.config.Auth.Schemes {
+		if s.Name == "" {
+			continue
+		}
+		openapi.Components.SecuritySchemes[s.Name] = s.toSpec()
+		registered[s.Name] = true
+	}
+
+	// 2. Predefined fallbacks for endpoint-referenced names.
 	for scheme := range usedSchemes {
-		switch scheme {
-		case SecurityBearerAuth:
-			openapi.Components.SecuritySchemes[SecurityBearerAuth] = &spec.SecurityScheme{
-				Type:         "http",
-				Scheme:       "bearer",
-				BearerFormat: "JWT",
-				Description:  "JWT Bearer token authentication",
-			}
-		case SecurityBasicAuth:
-			openapi.Components.SecuritySchemes[SecurityBasicAuth] = &spec.SecurityScheme{
-				Type:        "http",
-				Scheme:      "basic",
-				Description: "HTTP Basic authentication",
-			}
-		case SecurityApiKey:
-			openapi.Components.SecuritySchemes[SecurityApiKey] = &spec.SecurityScheme{
-				Type:        "apiKey",
-				In:          "header",
-				Name:        "X-API-Key",
-				Description: "API key in X-API-Key header",
-			}
-		case SecurityApiKeyQuery:
-			openapi.Components.SecuritySchemes[SecurityApiKeyQuery] = &spec.SecurityScheme{
-				Type:        "apiKey",
-				In:          "query",
-				Name:        "api_key",
-				Description: "API key in query parameter",
-			}
-		case SecurityOAuth2:
-			openapi.Components.SecuritySchemes[SecurityOAuth2] = &spec.SecurityScheme{
-				Type:        "oauth2",
-				Description: "OAuth2 authentication",
-				Flows: &spec.OAuthFlows{
-					AuthorizationCode: &spec.OAuthFlow{
-						AuthorizationURL: "/oauth2/authorize",
-						TokenURL:         "/oauth2/token",
-						Scopes: map[string]string{
-							"read":  "Read access",
-							"write": "Write access",
-						},
+		if registered[scheme] {
+			continue
+		}
+		if predef := predefinedScheme(scheme); predef != nil {
+			openapi.Components.SecuritySchemes[scheme] = predef
+		}
+		// else: unknown — caller must register it via Config.Auth.Schemes.
+	}
+}
+
+// predefinedScheme returns the spec for a known SecurityXxx constant, or nil
+// if the name is not one of the built-ins.
+func predefinedScheme(name string) *spec.SecurityScheme {
+	switch name {
+	case SecurityBearerAuth:
+		return &spec.SecurityScheme{
+			Type:         "http",
+			Scheme:       "bearer",
+			BearerFormat: "JWT",
+			Description:  "JWT Bearer token authentication",
+		}
+	case SecurityBasicAuth:
+		return &spec.SecurityScheme{
+			Type:        "http",
+			Scheme:      "basic",
+			Description: "HTTP Basic authentication",
+		}
+	case SecurityApiKey:
+		return &spec.SecurityScheme{
+			Type:        "apiKey",
+			In:          "header",
+			Name:        "X-API-Key",
+			Description: "API key in X-API-Key header",
+		}
+	case SecurityApiKeyQuery:
+		return &spec.SecurityScheme{
+			Type:        "apiKey",
+			In:          "query",
+			Name:        "api_key",
+			Description: "API key in query parameter",
+		}
+	case SecurityCookieAuth:
+		return &spec.SecurityScheme{
+			Type:        "apiKey",
+			In:          "cookie",
+			Name:        "session_id",
+			Description: "Session cookie authentication",
+		}
+	case SecurityOAuth2:
+		return &spec.SecurityScheme{
+			Type:        "oauth2",
+			Description: "OAuth2 authentication",
+			Flows: &spec.OAuthFlows{
+				AuthorizationCode: &spec.OAuthFlow{
+					AuthorizationURL: "/oauth2/authorize",
+					TokenURL:         "/oauth2/token",
+					Scopes: map[string]string{
+						"read":  "Read access",
+						"write": "Write access",
 					},
 				},
-			}
-		default:
-			// Custom scheme name - add as bearer auth by default
-			openapi.Components.SecuritySchemes[scheme] = &spec.SecurityScheme{
-				Type:         "http",
-				Scheme:       "bearer",
-				BearerFormat: "JWT",
-				Description:  scheme + " authentication",
-			}
+			},
 		}
 	}
+	return nil
 }
 
 func (d *Docs) addEndpointToSpec(openapi *spec.OpenAPI, ep Endpoint) {
@@ -303,7 +340,7 @@ func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
 		}
 
 		rb := spec.NewRequestBody(ep.RequestBody.Description, ep.RequestBody.Required).
-			WithJSONContent(s)
+			WithContent(contentType, s)
 		op.WithRequestBody(rb)
 	}
 

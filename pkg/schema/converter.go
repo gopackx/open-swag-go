@@ -41,22 +41,22 @@ func FromType(t interface{}) *Schema {
 	if t == nil {
 		return &Schema{Type: "object"}
 	}
-	return fromReflectType(reflect.TypeOf(t))
+	return fromReflectType(reflect.TypeOf(t), map[reflect.Type]bool{})
 }
 
 // FromReflectType converts a reflect.Type to JSON Schema
 func FromReflectType(t reflect.Type) *Schema {
-	return fromReflectType(t)
+	return fromReflectType(t, map[reflect.Type]bool{})
 }
 
-func fromReflectType(t reflect.Type) *Schema {
+func fromReflectType(t reflect.Type, visiting map[reflect.Type]bool) *Schema {
 	if t == nil {
 		return &Schema{Type: "object"}
 	}
 
 	// Handle pointer types
 	if t.Kind() == reflect.Ptr {
-		return fromReflectType(t.Elem())
+		return fromReflectType(t.Elem(), visiting)
 	}
 
 	// Handle time.Time specially
@@ -103,14 +103,14 @@ func fromReflectType(t reflect.Type) *Schema {
 	case reflect.Slice, reflect.Array:
 		return &Schema{
 			Type:  "array",
-			Items: fromReflectType(t.Elem()),
+			Items: fromReflectType(t.Elem(), visiting),
 		}
 	case reflect.Struct:
-		return fromStruct(t)
+		return fromStruct(t, visiting)
 	case reflect.Map:
 		return &Schema{
 			Type:                 "object",
-			AdditionalProperties: fromReflectType(t.Elem()),
+			AdditionalProperties: fromReflectType(t.Elem(), visiting),
 		}
 	case reflect.Interface:
 		return &Schema{} // empty schema = accepts any type
@@ -119,7 +119,15 @@ func fromReflectType(t reflect.Type) *Schema {
 	}
 }
 
-func fromStruct(t reflect.Type) *Schema {
+func fromStruct(t reflect.Type, visiting map[reflect.Type]bool) *Schema {
+	// Cycle guard: a struct that references itself (directly or via slice/map/pointer)
+	// would otherwise recurse forever. Return an open object schema for the back-edge.
+	if visiting[t] {
+		return &Schema{Type: "object", Description: "Recursive reference to " + t.String()}
+	}
+	visiting[t] = true
+	defer delete(visiting, t)
+
 	schema := &Schema{
 		Type:       "object",
 		Properties: make(map[string]*Schema),
@@ -140,7 +148,7 @@ func fromStruct(t reflect.Type) *Schema {
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
-				embedded := fromReflectType(ft)
+				embedded := fromReflectType(ft, visiting)
 				if embedded.Properties != nil {
 					for k, v := range embedded.Properties {
 						schema.Properties[k] = v
@@ -181,7 +189,7 @@ func fromStruct(t reflect.Type) *Schema {
 		}
 
 		// Build schema from field type
-		fieldSchema := fromReflectType(field.Type)
+		fieldSchema := fromReflectType(field.Type, visiting)
 
 		// Parse additional tags
 		ParseFieldTags(field, fieldSchema)

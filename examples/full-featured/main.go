@@ -83,16 +83,12 @@ var CreateProductDoc = openswag.Endpoint{
 	Summary:     "Create a new product",
 	Description: "Create a new product in the catalog",
 	Tags:        []string{"Products"},
-	RequestBody: &openswag.RequestBody{
-		Description: "Product data",
-		Required:    true,
-		Schema:      CreateProductRequest{},
-	},
-	Responses: map[int]openswag.Response{
-		201: {Description: "Product created", Schema: ProductResponse{}},
-		400: {Description: "Invalid request", Schema: ErrorResponse{}},
-		401: {Description: "Unauthorized", Schema: ErrorResponse{}},
-		500: {Description: "Server error", Schema: ErrorResponse{}},
+	RequestBody: openswag.BodyWithDesc("Product data", CreateProductRequest{}),
+	Responses: openswag.Responses{
+		201: openswag.Response("Product created", ProductResponse{}),
+		400: openswag.Response("Invalid request", ErrorResponse{}),
+		401: openswag.Response("Unauthorized", ErrorResponse{}),
+		500: openswag.Response("Server error", ErrorResponse{}),
 	},
 	Security: []string{openswag.SecurityBearerAuth}, // Use predefined constant
 }
@@ -104,9 +100,9 @@ var GetProductDoc = openswag.Endpoint{
 	Description: "Retrieve a single product by its ID",
 	Tags:        []string{"Products"},
 	PathParams:  ProductPathParams{}, // Using struct instead of manual Parameters
-	Responses: map[int]openswag.Response{
-		200: {Description: "Product found", Schema: ProductResponse{}},
-		404: {Description: "Product not found", Schema: ErrorResponse{}},
+	Responses: openswag.Responses{
+		200: openswag.Response("Product found", ProductResponse{}),
+		404: openswag.Response("Product not found", ErrorResponse{}),
 	},
 }
 
@@ -117,8 +113,8 @@ var ListProductsDoc = openswag.Endpoint{
 	Description: "Get a paginated list of products with optional filtering",
 	Tags:        []string{"Products"},
 	QueryParams: ListProductsQuery{}, // Using struct instead of manual Parameters
-	Responses: map[int]openswag.Response{
-		200: {Description: "Products list", Schema: PaginatedProducts{}},
+	Responses: openswag.Responses{
+		200: openswag.Response("Products list", PaginatedProducts{}),
 	},
 }
 
@@ -129,15 +125,11 @@ var UpdateProductDoc = openswag.Endpoint{
 	Description: "Update an existing product",
 	Tags:        []string{"Products"},
 	PathParams:  ProductPathParams{},
-	RequestBody: &openswag.RequestBody{
-		Description: "Updated product data",
-		Required:    true,
-		Schema:      CreateProductRequest{},
-	},
-	Responses: map[int]openswag.Response{
-		200: {Description: "Product updated", Schema: ProductResponse{}},
-		400: {Description: "Invalid request", Schema: ErrorResponse{}},
-		404: {Description: "Product not found", Schema: ErrorResponse{}},
+	RequestBody: openswag.BodyWithDesc("Updated product data", CreateProductRequest{}),
+	Responses: openswag.Responses{
+		200: openswag.Response("Product updated", ProductResponse{}),
+		400: openswag.Response("Invalid request", ErrorResponse{}),
+		404: openswag.Response("Product not found", ErrorResponse{}),
 	},
 	Security: []string{openswag.SecurityBearerAuth},
 }
@@ -149,9 +141,9 @@ var DeleteProductDoc = openswag.Endpoint{
 	Description: "Delete a product from the catalog",
 	Tags:        []string{"Products"},
 	PathParams:  ProductPathParams{},
-	Responses: map[int]openswag.Response{
-		204: {Description: "Product deleted"},
-		404: {Description: "Product not found", Schema: ErrorResponse{}},
+	Responses: openswag.Responses{
+		204: openswag.Response("Product deleted"),
+		404: openswag.Response("Product not found", ErrorResponse{}),
 	},
 	Security:   []string{openswag.SecurityBearerAuth},
 	Deprecated: false,

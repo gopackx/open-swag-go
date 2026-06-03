@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	openswag "github.com/gopackx/open-swag-go"
-	"github.com/gopackx/open-swag-go/pkg/spec"
 )
 
 // DTO types
@@ -61,16 +60,12 @@ var CreateUserDoc = openswag.Endpoint{
 	Summary:     "Create a new user",
 	Description: "Create a new user account with the provided information",
 	Tags:        []string{"Users"},
-	RequestBody: &openswag.RequestBody{
-		Description: "User data",
-		Required:    true,
-		Schema:      CreateUserRequest{},
+	RequestBody: openswag.BodyWithDesc("User data", CreateUserRequest{}),
+	Responses: openswag.Responses{
+		201: openswag.Response("User created successfully", UserResponse{}),
+		400: openswag.Response("Invalid request", ErrorResponse{}),
 	},
-	Responses: map[int]openswag.Response{
-		201: {Description: "User created successfully", Schema: UserResponse{}},
-		400: {Description: "Invalid request", Schema: ErrorResponse{}},
-	},
-	Security: []string{"bearerAuth"},
+	Security: []string{openswag.SecurityBearerAuth},
 }
 
 var GetUserDoc = openswag.Endpoint{
@@ -80,13 +75,13 @@ var GetUserDoc = openswag.Endpoint{
 	Description: "Retrieve a user by their unique identifier",
 	Tags:        []string{"Users"},
 	Parameters: []openswag.Parameter{
-		{Name: "id", In: "path", Description: "User ID", Required: true, Schema: spec.NewSchema("string")},
+		openswag.PathParam("id", "User ID"),
 	},
-	Responses: map[int]openswag.Response{
-		200: {Description: "User found", Schema: UserResponse{}},
-		404: {Description: "User not found", Schema: ErrorResponse{}},
+	Responses: openswag.Responses{
+		200: openswag.Response("User found", UserResponse{}),
+		404: openswag.Response("User not found", ErrorResponse{}),
 	},
-	Security: []string{"bearerAuth"},
+	Security: []string{openswag.SecurityBearerAuth},
 }
 
 var ListUsersDoc = openswag.Endpoint{
@@ -96,13 +91,13 @@ var ListUsersDoc = openswag.Endpoint{
 	Description: "Get a paginated list of users",
 	Tags:        []string{"Users"},
 	Parameters: []openswag.Parameter{
-		{Name: "page", In: "query", Description: "Page number"},
-		{Name: "limit", In: "query", Description: "Items per page"},
+		openswag.QueryParam("page", "Page number"),
+		openswag.QueryParam("limit", "Items per page"),
 	},
-	Responses: map[int]openswag.Response{
-		200: {Description: "Users retrieved", Schema: []UserResponse{}},
+	Responses: openswag.Responses{
+		200: openswag.Response("Users retrieved", []UserResponse{}),
 	},
-	Security: []string{"bearerAuth"},
+	Security: []string{openswag.SecurityBearerAuth},
 }
 
 func main() {
@@ -127,6 +122,11 @@ func main() {
 			Theme:       "purple",
 			DarkMode:    true,
 			ShowSidebar: true,
+		},
+		Auth: openswag.AuthConfig{
+			Schemes: []openswag.AuthScheme{
+				openswag.BearerAuth(openswag.SecurityBearerAuth),
+			},
 		},
 	})
 
