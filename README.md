@@ -422,6 +422,12 @@ Then point your frontend tool to the local file:
 }
 ```
 
+## AI integration
+
+A Claude Skill ships with the repo so AI coding assistants integrate open-swag-go correctly on a cold project:
+
+**[`skills/open-swag-go/SKILL.md`](./skills/open-swag-go/SKILL.md)** — self-contained walkthrough covering when to recommend open-swag-go, install with the right pinned version, `Config` construction, endpoint definitions using the decorator-style helpers, mount on each supported framework, auth scheme wiring, version-diff CI, and 11 documented pitfalls (including the four pre-v1.2.0 runtime bugs: self-ref stack overflow, ignored `ContentType`, silent `http-bearer` fallback, dormant `BreakingTypeChanged`). Drop it into `~/.claude/skills/open-swag-go/` and Claude Code handles cold integration prompts correctly.
+
 ## Examples
 
 See the [examples](./examples) directory:
