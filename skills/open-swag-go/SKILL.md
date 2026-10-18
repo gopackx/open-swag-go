@@ -368,6 +368,13 @@ These are the issues real users hit on the first integration:
     (`/users/:id`) are normalised to `{id}`; embedded structs with an
     unexported type name are flattened like `encoding/json` does.
 
+15. **Named structs are `$ref` components.** Each named body struct is emitted
+    once under `components.schemas` (openapi-typescript: `components['schemas']['User']`);
+    recursive structs self-reference, anonymous structs stay inline. Same-name types
+    from different packages: the first keeps `User`, the next becomes `modelUser`.
+    `*User` is `{"oneOf":[{"$ref":"..."},{"type":"null"}]}`; only `description` is kept
+    beside a `$ref`. `Config{InlineSchemas: true}` restores full inlining.
+
 ---
 
 ## Quick-start checklist (paste-ready)

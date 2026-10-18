@@ -2,8 +2,12 @@ package openswag
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/gopackx/open-swag-go/internal/testtypes"
+	"github.com/gopackx/open-swag-go/pkg/schema"
 )
 
 // O1: Generating a schema for a self-referential struct must not stack-overflow.
@@ -320,7 +324,9 @@ func TestPointerFieldsAreNullable31(t *testing.T) {
 		Manager  *manager `json:"manager"`
 		Any      *any     `json:"any"`
 	}
-	docs := New(Config{Info: Info{Title: "t", Version: "1"}})
+	// InlineSchemas keeps the inline form asserted here; the components form
+	// of a nullable struct is covered by TestNullableRefUsesOneOf.
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}, InlineSchemas: true})
 	docs.Add(Endpoint{
 		Method:      "POST",
 		Path:        "/people",
@@ -384,5 +390,217 @@ func TestExplicitParameterExampleIsEmitted(t *testing.T) {
 	}
 	if _, has := byName["q"]["example"]; has {
 		t.Errorf("q must not have an example: %v", byName["q"])
+	}
+}
+
+// --- Schema components ---
+
+type Address struct {
+	City string `json:"city"`
+}
+
+type User struct {
+	Name    string   `json:"name" validate:"required"`
+	Address *Address `json:"address" description:"Postal address"`
+	Home    Address  `json:"home" description:"Home address"`
+	Work    Address  `json:"work"`
+}
+
+// bodySchema returns the JSON media-type schema of an operation's request body.
+func bodySchema(t *testing.T, op map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	content := op["requestBody"].(map[string]interface{})["content"].(map[string]interface{})
+	return content["application/json"].(map[string]interface{})["schema"].(map[string]interface{})
+}
+
+// responseSchema returns the JSON schema of one of an operation's responses.
+func responseSchema(t *testing.T, op map[string]interface{}, code string) map[string]interface{} {
+	t.Helper()
+	resp := op["responses"].(map[string]interface{})[code].(map[string]interface{})
+	content := resp["content"].(map[string]interface{})
+	return content["application/json"].(map[string]interface{})["schema"].(map[string]interface{})
+}
+
+func componentSchemas(t *testing.T, m map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	comp, _ := m["components"].(map[string]interface{})
+	schemas, ok := comp["schemas"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("spec has no components.schemas: %v", m["components"])
+	}
+	return schemas
+}
+
+func hasComponentSchemas(m map[string]interface{}) bool {
+	comp, _ := m["components"].(map[string]interface{})
+	_, has := comp["schemas"]
+	return has
+}
+
+func TestNamedStructIsSharedComponent(t *testing.T) {
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}})
+	docs.Add(Endpoint{
+		Method:      "POST",
+		Path:        "/users",
+		RequestBody: &RequestBody{Schema: &User{}, Required: true},
+		Responses:   Responses{201: Response("created", User{})},
+	})
+	docs.Add(Endpoint{
+		Method:    "GET",
+		Path:      "/users",
+		Responses: Responses{200: Response("ok", []User{})},
+	})
+
+	m := buildSpecMap(t, docs)
+	schemas := componentSchemas(t, m)
+	if len(schemas) != 2 || schemas["User"] == nil || schemas["Address"] == nil {
+		t.Fatalf("expected exactly the User and Address components, got %v", schemas)
+	}
+
+	ref := map[string]interface{}{"$ref": "#/components/schemas/User"}
+	post := operation(t, m, "/users", "post")
+	if got := bodySchema(t, post); !reflect.DeepEqual(got, ref) {
+		t.Errorf("request body schema = %v, want %v", got, ref)
+	}
+	if got := responseSchema(t, post, "201"); !reflect.DeepEqual(got, ref) {
+		t.Errorf("201 schema = %v, want %v", got, ref)
+	}
+	list := responseSchema(t, operation(t, m, "/users", "get"), "200")
+	if list["type"] != "array" || !reflect.DeepEqual(list["items"], ref) {
+		t.Errorf("list response = %v, want array of %v", list, ref)
+	}
+
+	user := schemas["User"].(map[string]interface{})
+	if user["type"] != "object" || !reflect.DeepEqual(user["required"], []interface{}{"name"}) {
+		t.Errorf("User component = %v", user)
+	}
+}
+
+func TestNullableRefUsesOneOf(t *testing.T) {
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}})
+	docs.Add(Endpoint{Method: "GET", Path: "/u", Responses: Responses{200: Response("ok", User{})}})
+
+	js, _ := docs.SpecJSON()
+	if strings.Contains(string(js), `"nullable"`) {
+		t.Errorf("OpenAPI 3.1 spec must not contain the nullable keyword: %s", js)
+	}
+	user := componentSchemas(t, buildSpecMap(t, docs))["User"].(map[string]interface{})
+	props := user["properties"].(map[string]interface{})
+
+	wantNullable := map[string]interface{}{
+		"description": "Postal address",
+		"oneOf": []interface{}{
+			map[string]interface{}{"$ref": "#/components/schemas/Address"},
+			map[string]interface{}{"type": "null"},
+		},
+	}
+	if got := props["address"]; !reflect.DeepEqual(got, wantNullable) {
+		t.Errorf("*Address = %v, want %v", got, wantNullable)
+	}
+	wantDescribed := map[string]interface{}{"$ref": "#/components/schemas/Address", "description": "Home address"}
+	if got := props["home"]; !reflect.DeepEqual(got, wantDescribed) {
+		t.Errorf("Address with description = %v, want %v", got, wantDescribed)
+	}
+	if got := props["work"]; !reflect.DeepEqual(got, map[string]interface{}{"$ref": "#/components/schemas/Address"}) {
+		t.Errorf("plain Address should be a bare $ref, got %v", got)
+	}
+}
+
+func TestRecursiveStructUsesSelfRef(t *testing.T) {
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}})
+	docs.Add(Endpoint{Method: "GET", Path: "/categories", Responses: Responses{200: Response("ok", []category{})}})
+
+	m := buildSpecMap(t, docs)
+	ref := map[string]interface{}{"$ref": "#/components/schemas/category"}
+	if got := responseSchema(t, operation(t, m, "/categories", "get"), "200")["items"]; !reflect.DeepEqual(got, ref) {
+		t.Errorf("response items = %v, want %v", got, ref)
+	}
+	comp := componentSchemas(t, m)["category"].(map[string]interface{})
+	children := comp["properties"].(map[string]interface{})["children"].(map[string]interface{})
+	if !reflect.DeepEqual(children["items"], ref) {
+		t.Errorf("children.items = %v, want %v", children["items"], ref)
+	}
+	js, _ := docs.SpecJSON()
+	if strings.Contains(string(js), "Recursive reference") {
+		t.Errorf("recursion should use $ref, not the inline fallback: %s", js)
+	}
+}
+
+func TestAnonymousStructStaysInline(t *testing.T) {
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}})
+	docs.Add(Endpoint{
+		Method: "POST",
+		Path:   "/login",
+		RequestBody: &RequestBody{Schema: struct {
+			Username string `json:"username"`
+		}{}},
+		Responses: Responses{200: Response("ok")},
+	})
+	m := buildSpecMap(t, docs)
+	body := bodySchema(t, operation(t, m, "/login", "post"))
+	if body["type"] != "object" || body["properties"].(map[string]interface{})["username"] == nil {
+		t.Errorf("anonymous body should be inline, got %v", body)
+	}
+	if hasComponentSchemas(m) {
+		t.Errorf("no components.schemas expected, got %v", m["components"])
+	}
+}
+
+func TestSameNameDifferentPackages(t *testing.T) {
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}})
+	docs.Add(Endpoint{Method: "GET", Path: "/a", Responses: Responses{200: Response("ok", User{})}})
+	docs.Add(Endpoint{Method: "GET", Path: "/b", Responses: Responses{200: Response("ok", testtypes.User{})}})
+
+	m := buildSpecMap(t, docs)
+	if got := responseSchema(t, operation(t, m, "/a", "get"), "200")["$ref"]; got != "#/components/schemas/User" {
+		t.Errorf("/a ref = %v", got)
+	}
+	if got := responseSchema(t, operation(t, m, "/b", "get"), "200")["$ref"]; got != "#/components/schemas/testtypesUser" {
+		t.Errorf("/b ref = %v", got)
+	}
+	other := componentSchemas(t, m)["testtypesUser"].(map[string]interface{})
+	if other["properties"].(map[string]interface{})["email"] == nil {
+		t.Errorf("testtypesUser should be testtypes.User, got %v", other)
+	}
+}
+
+// InlineSchemas: true reproduces the pre-components output: no
+// components.schemas, no $ref, and every body schema equal to the plain
+// inline conversion.
+func TestInlineSchemasRestoresInlining(t *testing.T) {
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}, InlineSchemas: true})
+	docs.Add(Endpoint{
+		Method:      "POST",
+		Path:        "/users",
+		RequestBody: &RequestBody{Schema: &User{}},
+		Responses:   Responses{200: Response("ok", []category{})},
+	})
+
+	m := buildSpecMap(t, docs)
+	if hasComponentSchemas(m) {
+		t.Fatalf("InlineSchemas must not emit components.schemas, got %v", m["components"])
+	}
+	js, _ := docs.SpecJSON()
+	if strings.Contains(string(js), "$ref") {
+		t.Errorf("InlineSchemas output must not contain $ref: %s", js)
+	}
+
+	inline := func(v interface{}) map[string]interface{} {
+		raw, err := json.Marshal(convertSchema(schema.FromType(v)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]interface{}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	op := operation(t, m, "/users", "post")
+	if got, want := bodySchema(t, op), inline(&User{}); !reflect.DeepEqual(got, want) {
+		t.Errorf("inline body = %v, want %v", got, want)
+	}
+	if got, want := responseSchema(t, op, "200"), inline([]category{}); !reflect.DeepEqual(got, want) {
+		t.Errorf("inline response = %v, want %v", got, want)
 	}
 }

@@ -10,6 +10,11 @@ type Config struct {
 	UI       UIConfig   `json:"ui"`
 	Auth     AuthConfig `json:"auth"`
 	DocsAuth *DocsAuth  `json:"docsAuth,omitempty"`
+	// InlineSchemas disables schema components. By default every named
+	// struct used in a request or response body is emitted once under
+	// components.schemas and referenced with $ref; set InlineSchemas to
+	// inline every struct at each use instead (the pre-components output).
+	InlineSchemas bool `json:"inlineSchemas,omitempty"`
 }
 
 // AuthConfig configures the security schemes exposed by the generated spec.
@@ -106,12 +111,24 @@ type Tag struct {
 
 // UIConfig configures the documentation UI
 type UIConfig struct {
-	Theme              string `json:"theme"`
-	DarkMode           bool   `json:"darkMode"`
-	Layout             string `json:"layout"`
-	ShowSidebar        bool   `json:"showSidebar"`
-	SidebarSearch      bool   `json:"sidebarSearch"`
-	TagGrouping        bool   `json:"tagGrouping"`
+	Theme       string `json:"theme"`
+	DarkMode    bool   `json:"darkMode"`
+	Layout      string `json:"layout"`
+	ShowSidebar bool   `json:"showSidebar"`
+	// SidebarSearch is not passed to Scalar. Scalar always shows the sidebar
+	// search unless its hideSearch option is set.
+	//
+	// Deprecated: has no effect; kept for compatibility.
+	SidebarSearch bool `json:"sidebarSearch"`
+	// TagGrouping is not passed to Scalar. Scalar always groups operations by
+	// tag.
+	//
+	// Deprecated: has no effect; kept for compatibility.
+	TagGrouping bool `json:"tagGrouping"`
+	// CollapsibleSchemas is not passed to Scalar. Scalar always renders model
+	// sections collapsed unless its expandAllModelSections option is set.
+	//
+	// Deprecated: has no effect; kept for compatibility.
 	CollapsibleSchemas bool   `json:"collapsibleSchemas"`
 	CustomCSS          string `json:"customCss,omitempty"`
 	// ScalarVersion pins the @scalar/api-reference version loaded from the

@@ -10,7 +10,8 @@ import (
 
 // Config for example generation
 type Config struct {
-	UseFaker     bool
+	// TypeExamples maps a format name (e.g. "email", "uuid") to the example
+	// value used for fields with that format. Nil means DefaultTypeExamples().
 	TypeExamples map[string]interface{}
 }
 

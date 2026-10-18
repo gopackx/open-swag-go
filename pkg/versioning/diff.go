@@ -132,7 +132,7 @@ func (d *Differ) Compare(oldSpec, newSpec map[string]interface{}) (*Diff, error)
 		if newMethods, exists := newPaths[path]; exists {
 			for method, oldOp := range oldMethods {
 				if newOp, methodExists := newMethods[method]; methodExists {
-					changes := d.compareOperations(path, method, oldOp, newOp)
+					changes := d.compareOperations(oldSpec, newSpec, path, method, oldOp, newOp)
 					diff.Changes = append(diff.Changes, changes...)
 
 					for _, change := range changes {
@@ -158,7 +158,9 @@ func (d *Differ) Compare(oldSpec, newSpec map[string]interface{}) (*Diff, error)
 	return diff, nil
 }
 
-func (d *Differ) compareOperations(path, method string, oldOp, newOp map[string]interface{}) []Change {
+// compareOperations compares one operation present in both specs. The full
+// specs are passed so that $refs into components.schemas can be resolved.
+func (d *Differ) compareOperations(oldSpec, newSpec map[string]interface{}, path, method string, oldOp, newOp map[string]interface{}) []Change {
 	changes := []Change{}
 
 	// Compare request body
@@ -187,8 +189,8 @@ func (d *Differ) compareOperations(path, method string, oldOp, newOp map[string]
 	}
 
 	// Compare required fields in request body
-	oldRequired := getRequiredFields(oldOp)
-	newRequired := getRequiredFields(newOp)
+	oldRequired := getRequiredFields(oldSpec, oldOp)
+	newRequired := getRequiredFields(newSpec, newOp)
 
 	for _, field := range newRequired {
 		if !contains(oldRequired, field) {
@@ -205,8 +207,8 @@ func (d *Differ) compareOperations(path, method string, oldOp, newOp map[string]
 	// Compare field types in the request body — changing the JSON type or
 	// format of an existing field breaks client deserialization. Tagged with
 	// BreakingTypeChanged in the breaking-rule catalog.
-	oldFields := getBodyFieldTypes(oldOp)
-	newFields := getBodyFieldTypes(newOp)
+	oldFields := getBodyFieldTypes(oldSpec, oldOp)
+	newFields := getBodyFieldTypes(newSpec, newOp)
 	for name, oldType := range oldFields {
 		if newType, exists := newFields[name]; exists && newType != oldType {
 			changes = append(changes, Change{
@@ -221,8 +223,8 @@ func (d *Differ) compareOperations(path, method string, oldOp, newOp map[string]
 
 	// Compare parameter types — same rationale as body fields, but for
 	// path/query/header/cookie params.
-	oldParamTypes := getParamTypes(oldOp)
-	newParamTypes := getParamTypes(newOp)
+	oldParamTypes := getParamTypes(oldSpec, oldOp)
+	newParamTypes := getParamTypes(newSpec, newOp)
 	for name, oldType := range oldParamTypes {
 		if newType, exists := newParamTypes[name]; exists && newType != oldType {
 			changes = append(changes, Change{
@@ -341,7 +343,9 @@ func getRequestBody(op map[string]interface{}) map[string]interface{} {
 	return nil
 }
 
-func getRequiredFields(op map[string]interface{}) []string {
+// getRequiredFields returns the required property names of the request-body
+// schema, resolving a top-level $ref against spec's components.schemas.
+func getRequiredFields(spec, op map[string]interface{}) []string {
 	var required []string
 
 	body := getRequestBody(op)
@@ -357,6 +361,7 @@ func getRequiredFields(op map[string]interface{}) []string {
 	for _, mediaType := range content {
 		if mt, ok := mediaType.(map[string]interface{}); ok {
 			if schema, ok := mt["schema"].(map[string]interface{}); ok {
+				schema = resolveSchema(spec, schema)
 				if req, ok := schema["required"].([]interface{}); ok {
 					for _, r := range req {
 						if s, ok := r.(string); ok {
@@ -401,8 +406,9 @@ func getParameters(op map[string]interface{}) map[string]map[string]interface{} 
 
 // getBodyFieldTypes returns a map of request-body property name → "type[/format]".
 // Format is included because changing int32→int64 (same JSON type, different
-// format) still breaks strongly-typed clients.
-func getBodyFieldTypes(op map[string]interface{}) map[string]string {
+// format) still breaks strongly-typed clients. A top-level $ref, and $refs on
+// the properties themselves, are resolved against spec's components.schemas.
+func getBodyFieldTypes(spec, op map[string]interface{}) map[string]string {
 	result := make(map[string]string)
 
 	body := getRequestBody(op)
@@ -422,13 +428,14 @@ func getBodyFieldTypes(op map[string]interface{}) map[string]string {
 		if !ok {
 			continue
 		}
+		schema = resolveSchema(spec, schema)
 		props, ok := schema["properties"].(map[string]interface{})
 		if !ok {
 			continue
 		}
 		for name, p := range props {
 			if pm, ok := p.(map[string]interface{}); ok {
-				result[name] = schemaTypeSignature(pm)
+				result[name] = resolvedTypeSignature(spec, pm)
 			}
 		}
 		// First media type is enough; multiple media types with diverging
@@ -440,7 +447,7 @@ func getBodyFieldTypes(op map[string]interface{}) map[string]string {
 }
 
 // getParamTypes returns a map of parameter name → "type[/format]".
-func getParamTypes(op map[string]interface{}) map[string]string {
+func getParamTypes(spec, op map[string]interface{}) map[string]string {
 	result := make(map[string]string)
 	params, ok := op["parameters"].([]interface{})
 	if !ok {
@@ -456,7 +463,7 @@ func getParamTypes(op map[string]interface{}) map[string]string {
 			continue
 		}
 		if schema, ok := pm["schema"].(map[string]interface{}); ok {
-			result[name] = schemaTypeSignature(schema)
+			result[name] = resolvedTypeSignature(spec, schema)
 		}
 	}
 	return result
@@ -486,6 +493,92 @@ func schemaTypeSignature(schema map[string]interface{}) string {
 		return t + "/" + f
 	}
 	return t
+}
+
+// componentRefPrefix is the only $ref form the differ resolves: a local
+// pointer to a schema component.
+const componentRefPrefix = "#/components/schemas/"
+
+// maxRefDepth bounds how many chained $refs resolveSchema follows, so a
+// malformed spec with a ref cycle cannot loop forever.
+const maxRefDepth = 8
+
+// resolveSchema follows "#/components/schemas/<Name>" $refs in spec until it
+// reaches a schema without one. A $ref that cannot be resolved (external,
+// unknown name, too deep) is returned as is.
+func resolveSchema(spec, schema map[string]interface{}) map[string]interface{} {
+	for i := 0; i < maxRefDepth; i++ {
+		ref, ok := schema["$ref"].(string)
+		if !ok {
+			return schema
+		}
+		target := componentSchema(spec, ref)
+		if target == nil {
+			return schema
+		}
+		schema = target
+	}
+	return schema
+}
+
+// componentSchema returns the components.schemas entry a local $ref points
+// to, or nil.
+func componentSchema(spec map[string]interface{}, ref string) map[string]interface{} {
+	name, ok := strings.CutPrefix(ref, componentRefPrefix)
+	if !ok || name == "" {
+		return nil
+	}
+	components, _ := spec["components"].(map[string]interface{})
+	schemas, _ := components["schemas"].(map[string]interface{})
+	target, _ := schemas[name].(map[string]interface{})
+	return target
+}
+
+// resolvedTypeSignature is schemaTypeSignature for a schema that may be a
+// $ref or a nullable $ref ({"oneOf": [{"$ref": ...}, {"type": "null"}]}).
+// The $ref is resolved so that moving a struct into components, or making
+// it nullable, is not reported as a type change: a nullable ref to an object
+// component and an inline ["object", "null"] both give "object". A $ref
+// that cannot be resolved yields "$ref:<ref>".
+func resolvedTypeSignature(spec, schema map[string]interface{}) string {
+	if branch := nonNullBranch(schema); branch != nil {
+		schema = branch
+	}
+	schema = resolveSchema(spec, schema)
+	if ref, ok := schema["$ref"].(string); ok {
+		return "$ref:" + ref
+	}
+	return schemaTypeSignature(schema)
+}
+
+// nonNullBranch returns X for an untyped {"oneOf"|"anyOf": [X, {"type":
+// "null"}]} union (the OpenAPI 3.1 form of a nullable $ref), or nil.
+func nonNullBranch(schema map[string]interface{}) map[string]interface{} {
+	if _, typed := schema["type"]; typed {
+		return nil
+	}
+	for _, key := range []string{"oneOf", "anyOf"} {
+		branches, ok := schema[key].([]interface{})
+		if !ok {
+			continue
+		}
+		var found map[string]interface{}
+		for _, b := range branches {
+			bm, ok := b.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			if t, _ := bm["type"].(string); t == "null" && len(bm) == 1 {
+				continue
+			}
+			if found != nil {
+				return nil // more than one non-null branch
+			}
+			found = bm
+		}
+		return found
+	}
+	return nil
 }
 
 func isParamRequired(param map[string]interface{}) bool {

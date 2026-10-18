@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/gopackx/open-swag-go/internal/testtypes"
 )
 
 type TokenRequest struct {
@@ -360,5 +362,173 @@ func assertInt(t *testing.T, name string, got *int, want int) {
 	t.Helper()
 	if got == nil || *got != want {
 		t.Errorf("%s = %v, want %v", name, got, want)
+	}
+}
+
+// --- Schema components (Registry) ---
+
+type User struct {
+	Name    string   `json:"name" validate:"required"`
+	Manager *User    `json:"manager" description:"The user's manager"`
+	Address *Address `json:"address"`
+	Home    Address  `json:"home" description:"Home address" example:"x" validate:"required"`
+}
+
+type Address struct {
+	City string `json:"city"`
+}
+
+type Category struct {
+	Name     string     `json:"name"`
+	Children []Category `json:"children"`
+}
+
+type Page[T any] struct {
+	Items []T `json:"items"`
+}
+
+func TestRegistry_NamedStructBecomesRef(t *testing.T) {
+	reg := NewRegistry()
+	s := FromTypeWithRegistry(&User{}, reg)
+	if s.Ref != RefPrefix+"User" || s.Type != "" || s.Nullable {
+		t.Fatalf("top-level named struct should be a bare $ref, got %+v", s)
+	}
+	if got := reg.Names(); !reflect.DeepEqual(got, []string{"User", "Address"}) {
+		t.Fatalf("registered names = %v, want [User Address]", got)
+	}
+	u := reg.Schema("User")
+	if u.Type != "object" || !contains(u.Required, "name") || !contains(u.Required, "home") {
+		t.Fatalf("User component = %+v", u)
+	}
+
+	// Self reference: a real $ref back to the component, nullable, with the
+	// field description as the only sibling.
+	mgr := u.Properties["manager"]
+	want := &Schema{Ref: RefPrefix + "User", Description: "The user's manager", Nullable: true}
+	if !reflect.DeepEqual(mgr, want) {
+		t.Errorf("manager = %+v, want %+v", mgr, want)
+	}
+	if addr := u.Properties["address"]; !reflect.DeepEqual(addr, &Schema{Ref: RefPrefix + "Address", Nullable: true}) {
+		t.Errorf("address = %+v", addr)
+	}
+	// Tags other than description (example, validate) do not leak next to $ref.
+	if home := u.Properties["home"]; !reflect.DeepEqual(home, &Schema{Ref: RefPrefix + "Address", Description: "Home address"}) {
+		t.Errorf("home = %+v", home)
+	}
+
+	// Converting again reuses the registered component.
+	again := FromTypeWithRegistry(Address{}, reg)
+	if again.Ref != RefPrefix+"Address" || reg.Len() != 2 {
+		t.Errorf("second conversion should reuse Address, got %+v (len %d)", again, reg.Len())
+	}
+}
+
+func TestRegistry_RecursiveSlice(t *testing.T) {
+	reg := NewRegistry()
+	FromTypeWithRegistry(Category{}, reg)
+	c := reg.Schema("Category")
+	if c == nil {
+		t.Fatal("Category not registered")
+	}
+	items := c.Properties["children"].Items
+	if items == nil || items.Ref != RefPrefix+"Category" {
+		t.Fatalf("children.items should $ref Category, got %+v", c.Properties["children"])
+	}
+	// Without a registry the cycle guard still applies.
+	inline := FromType(Category{})
+	if d := inline.Properties["children"].Items.Description; d == "" {
+		t.Errorf("inline recursion should fall back to the cycle guard, got %+v", inline.Properties["children"].Items)
+	}
+}
+
+func TestRegistry_AnonymousStructStaysInline(t *testing.T) {
+	reg := NewRegistry()
+	s := FromTypeWithRegistry(struct {
+		Inner struct {
+			A string `json:"a"`
+		} `json:"inner"`
+		Addr Address `json:"addr"`
+	}{}, reg)
+	if s.Ref != "" || s.Type != "object" {
+		t.Fatalf("anonymous struct should be inline, got %+v", s)
+	}
+	if inner := s.Properties["inner"]; inner.Ref != "" || inner.Properties["a"] == nil {
+		t.Errorf("anonymous nested struct should be inline, got %+v", inner)
+	}
+	if s.Properties["addr"].Ref != RefPrefix+"Address" {
+		t.Errorf("named field type should still be a $ref, got %+v", s.Properties["addr"])
+	}
+	if !reflect.DeepEqual(reg.Names(), []string{"Address"}) {
+		t.Errorf("only Address should be registered, got %v", reg.Names())
+	}
+}
+
+func TestRegistry_EmbeddedStructIsFlattened(t *testing.T) {
+	reg := NewRegistry()
+	FromTypeWithRegistry(withEmbedded{}, reg)
+	s := reg.Schema("withEmbedded")
+	for _, want := range []string{"id", "created_at", "by", "name"} {
+		if _, ok := s.Properties[want]; !ok {
+			t.Errorf("missing promoted property %q; got %v", want, keys(s.Properties))
+		}
+	}
+	if reg.Len() != 1 {
+		t.Errorf("embedded structs must not become components, got %v", reg.Names())
+	}
+}
+
+func TestRegistry_NameCollision(t *testing.T) {
+	reg := NewRegistry()
+	FromTypeWithRegistry(struct {
+		A User           `json:"a"`
+		B testtypes.User `json:"b"`
+	}{}, reg)
+	if name, _ := reg.NameOf(reflect.TypeOf(User{})); name != "User" {
+		t.Errorf("first User should keep the bare name, got %q", name)
+	}
+	if name, _ := reg.NameOf(reflect.TypeOf(testtypes.User{})); name != "testtypesUser" {
+		t.Errorf("second User should be package-prefixed, got %q", name)
+	}
+	if reg.Schema("testtypesUser").Properties["email"] == nil {
+		t.Errorf("testtypesUser should hold testtypes.User's schema")
+	}
+}
+
+func TestRegistry_GenericName(t *testing.T) {
+	reg := NewRegistry()
+	s := FromTypeWithRegistry(Page[Address]{}, reg)
+	if s.Ref != RefPrefix+"Page_schema.Address" {
+		t.Fatalf("generic component ref = %q", s.Ref)
+	}
+	if reg.Schema("Page_schema.Address").Properties["items"].Items.Ref != RefPrefix+"Address" {
+		t.Errorf("type argument should be referenced, got %+v", reg.Schema("Page_schema.Address"))
+	}
+}
+
+func TestSanitizeComponentName(t *testing.T) {
+	cases := map[string]string{
+		"User":                         "User",
+		"Page[github.com/x/dto.User]":  "Page_dto.User",
+		"Pair[a/b.X,c/d.Y]":            "Pair_b.X_d.Y",
+		"Page[a/b.Box[c/d.X]]":         "Page_b.Box_d.X",
+		"Map[string,*example.com/m.V]": "Map_string__m.V",
+		"Ünïcode":                      "_n_code",
+	}
+	for in, want := range cases {
+		if got := sanitizeComponentName(in); got != want {
+			t.Errorf("sanitizeComponentName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The collision prefix is the package name, not the directory name: this
+// package lives in .../open-swag-go/pkg/schema, and a root-module type would
+// otherwise get an "open-swag-go" prefix.
+func TestRegistryCollisionPrefixUsesPackageName(t *testing.T) {
+	type User struct {
+		A int `json:"a"`
+	}
+	if got := pkgName(reflect.TypeOf(User{})); got != "schema" {
+		t.Fatalf("pkgName = %q, want %q", got, "schema")
 	}
 }

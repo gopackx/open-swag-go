@@ -14,7 +14,7 @@ A modern OpenAPI documentation package for Go with **decorator-like DX**, simila
 - 🧪 **Try-it console & auth playground (via Scalar)** - provided by the bundled Scalar UI, not implemented by this library
 - 📊 **Auto examples** - Smart example generation from structs
 - 🔄 **Framework adapters** - Chi, Gin, Echo, Fiber
-- 📋 **Code snippets (via Scalar)** - shown in the Scalar UI; a standalone `pkg/tryit/snippets` generator (curl, JavaScript, Go, Python) is also available
+- 📋 **Code snippets (via Scalar)** - shown in the Scalar UI for every operation
 - ⚠️ **Version diff** - Breaking change detection
 
 ## Installation
@@ -254,6 +254,49 @@ as a type array, so `Name *string` becomes `"type": ["string", "null"]` and
 openapi-typescript generates `string | null`. Query and path parameters built
 from a struct treat a pointer as "optional" instead.
 
+## Schema components
+
+Every named struct used in a request or response body (directly, or nested in
+a field, slice or map) is emitted once under `components.schemas` and
+referenced with `$ref`:
+
+```json
+"requestBody": {
+  "content": {
+    "application/json": { "schema": { "$ref": "#/components/schemas/CreateUserRequest" } }
+  }
+}
+```
+
+Code generators therefore produce named types instead of anonymous objects;
+with openapi-typescript the type is `components['schemas']['CreateUserRequest']`.
+Recursive structs (`type Category struct { Children []Category }`) reference
+themselves with `$ref`. Anonymous structs (`struct{ ... }{}`), embedded structs
+(flattened into their parent) and query/path parameters stay inline.
+
+- **Names** are the Go type name. If two different types share a name, the
+  first one registered (in endpoint order, responses by status code) keeps it
+  and the next gets its package name as a prefix: `dto.User` and `model.User`
+  become `User` and `modelUser`. Generic types are sanitised to valid
+  component keys: `Page[dto.User]` becomes `Page_dto.User`.
+- **Nullable references.** A `*Address` field cannot use the
+  `["object", "null"]` type array, so it is emitted as
+  `{"oneOf": [{"$ref": "#/components/schemas/Address"}, {"type": "null"}]}`.
+- **Field tags on a referenced struct.** Only `description` is kept, as a
+  sibling of the `$ref`: `{"$ref": "#/components/schemas/Address",
+  "description": "Home address"}`. Other tags (`example`, `validate`, ...)
+  on such a field are dropped; put them on the struct's own fields.
+
+To inline every struct at each use instead (the output before components
+existed), set `InlineSchemas`:
+
+```go
+docs := openswag.New(openswag.Config{
+    Info:          openswag.Info{Title: "My API", Version: "1.0.0"},
+    InlineSchemas: true,
+})
+```
+
 ## Framework Adapters
 
 ### net/http (built-in)
@@ -304,23 +347,6 @@ import "github.com/gopackx/open-swag-go/pkg/examples"
 gen := examples.New(examples.Config{})
 example := gen.Generate(UserResponse{})
 // Returns map with smart examples based on field names and tags
-```
-
-### Code Snippet Generator
-
-```go
-import "github.com/gopackx/open-swag-go/pkg/tryit/snippets"
-
-gen := snippets.NewManager()
-req := snippets.Request{
-    Method:  "POST",
-    URL:     "https://api.example.com/users",
-    Headers: map[string]string{"Authorization": "Bearer token"},
-    Body:    `{"name": "John"}`,
-}
-
-all := gen.GenerateAll(req) // map[string]string keyed by language
-// Keys: curl, javascript, go, python
 ```
 
 ### Version Diff (Breaking Change Detection)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,9 +149,29 @@ func (d *Docs) BuildSpec() *spec.OpenAPI {
 		openapi.AddTag(spec.Tag{Name: tag.Name, Description: tag.Description})
 	}
 
+	// One registry per build: named structs used in request and response
+	// bodies become components.schemas entries referenced by $ref. A nil
+	// registry inlines every struct.
+	var reg *schema.Registry
+	if !d.config.InlineSchemas {
+		reg = schema.NewRegistry()
+	}
+
 	// Build paths from endpoints
 	for _, ep := range d.endpoints {
-		d.addEndpointToSpec(openapi, ep)
+		d.addEndpointToSpec(openapi, ep, reg)
+	}
+
+	if reg.Len() > 0 {
+		if openapi.Components == nil {
+			openapi.Components = &spec.Components{}
+		}
+		if openapi.Components.Schemas == nil {
+			openapi.Components.Schemas = make(map[string]*spec.Schema, reg.Len())
+		}
+		for _, name := range reg.Names() {
+			openapi.Components.Schemas[name] = convertSchema(reg.Schema(name))
+		}
 	}
 
 	// Add predefined security schemes if any endpoint uses security
@@ -276,7 +297,7 @@ var supportedMethods = map[string]bool{
 	"HEAD": true, "OPTIONS": true, "TRACE": true,
 }
 
-func (d *Docs) addEndpointToSpec(openapi *spec.OpenAPI, ep Endpoint) {
+func (d *Docs) addEndpointToSpec(openapi *spec.OpenAPI, ep Endpoint, reg *schema.Registry) {
 	method := strings.ToUpper(strings.TrimSpace(ep.Method))
 	if !supportedMethods[method] {
 		// Reported by Validate; never emit an empty path item.
@@ -290,7 +311,7 @@ func (d *Docs) addEndpointToSpec(openapi *spec.OpenAPI, ep Endpoint) {
 		pathItem = spec.NewPathItem()
 	}
 
-	operation := d.buildOperation(ep)
+	operation := d.buildOperation(ep, reg)
 
 	switch method {
 	case "GET":
@@ -412,7 +433,9 @@ func generateOperationID(method, path string) string {
 	return b.String()
 }
 
-func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
+// buildOperation converts ep into an operation. Request and response body
+// schemas use reg (nil inlines them); parameter schemas are always inline.
+func (d *Docs) buildOperation(ep Endpoint, reg *schema.Registry) *spec.Operation {
 	operationID := ep.OperationID
 	if operationID == "" {
 		operationID = generateOperationID(ep.Method, ep.Path)
@@ -480,7 +503,7 @@ func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
 
 		var s *spec.Schema
 		if ep.RequestBody.Schema != nil {
-			schemaResult := schema.FromType(ep.RequestBody.Schema)
+			schemaResult := schema.FromTypeWithRegistry(ep.RequestBody.Schema, reg)
 			s = convertSchema(schemaResult)
 		}
 
@@ -489,12 +512,19 @@ func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
 		op.WithRequestBody(rb)
 	}
 
-	// Build responses
-	for code, resp := range ep.Responses {
+	// Build responses in status-code order, so that component names (the
+	// first type registered keeps the bare name) do not depend on map order.
+	codes := make([]int, 0, len(ep.Responses))
+	for code := range ep.Responses {
+		codes = append(codes, code)
+	}
+	sort.Ints(codes)
+	for _, code := range codes {
+		resp := ep.Responses[code]
 		r := spec.NewResponse(resp.Description)
 
 		if resp.Schema != nil {
-			schemaResult := schema.FromType(resp.Schema)
+			schemaResult := schema.FromTypeWithRegistry(resp.Schema, reg)
 			s := convertSchema(schemaResult)
 			r.WithContent("application/json", s)
 		}

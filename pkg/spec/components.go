@@ -59,12 +59,27 @@ type schemaAlias Schema
 // OpenAPI 3.1 has no `nullable` keyword. When Nullable is set and the schema
 // has a concrete type, the type is emitted as a two-element array, e.g.
 // {"type": ["string", "null"]}. A nullable schema without a type (the "any"
-// schema) already accepts null, so nothing extra is emitted. $ref schemas are
-// emitted unchanged.
+// schema) already accepts null, so nothing extra is emitted.
+//
+// A non-nullable $ref schema is emitted unchanged. A nullable $ref cannot use
+// the type array, so the reference is wrapped instead:
+//
+//	{"oneOf": [{"$ref": "#/components/schemas/User"}, {"type": "null"}]}
+//
+// Any other keywords set alongside the $ref (such as a field description)
+// stay on the outer object. A nullable $ref that already has OneOf set is
+// emitted without the null branch.
 func (s Schema) MarshalJSON() ([]byte, error) {
 	a := schemaAlias(s)
 	nullable := a.Nullable
 	a.Nullable = false // never emit the 3.0 `nullable` keyword
+
+	if nullable && a.Ref != "" && len(a.OneOf) == 0 {
+		ref := &Schema{Ref: a.Ref}
+		a.Ref = ""
+		a.OneOf = []*Schema{ref, {Type: "null"}}
+		return json.Marshal(a)
+	}
 
 	if !nullable || a.Type == "" || a.Ref != "" {
 		return json.Marshal(a)

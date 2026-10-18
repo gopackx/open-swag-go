@@ -123,12 +123,12 @@ hal yang harus beres sebelum library ini layak dipromosikan sebagai v1 stabil.
 | P0 3 duplikat / method asing | Selesai | `Docs.Validate() error`; HEAD/OPTIONS/TRACE didukung |
 | P0 4 nullable 3.1 | Selesai | `spec.Schema.MarshalJSON` menulis `type: [T,"null"]`; differ versioning disesuaikan |
 | P0 5 operationId | Selesai | Default `getUsersById`, override via `Endpoint.OperationID` |
-| P1 6 `$ref`/components | Terbuka | Butuh keputusan: mengubah bentuk output |
+| P1 6 `$ref`/components | Selesai | Struct bernama jadi `components.schemas` + `$ref`; rekursi jadi self-ref; nullable ref via `oneOf`; `Config.InlineSchemas` mengembalikan inlining |
 | P1 7 go.mod adapter terpisah | Terbuka | Butuh keputusan: mengubah struktur modul; SKILL.md sudah jujur soal ini |
 | P1 8 pin Scalar CDN | Selesai | `@scalar/api-reference@1.75.0`, override via `UIConfig.ScalarVersion` |
 | P1 9 unifikasi tag param | Selesai | `swagger:"required"` kini berlaku di query param |
 | P1 10 validator tags | Selesai | `oneof`, `min/max/len/gte/lte/gt/lt`, format, `dive`, tag `enum` |
-| P2 11 hapus kode mati | Terbuka | Keputusan API publik |
+| P2 11 hapus kode mati | Selesai | `pkg/auth`, `pkg/tryit`, `themes.go`, faker/templates, validator/types dihapus; `UseFaker` dihapus; 3 field UIConfig ditandai Deprecated |
 | P2 12 README | Selesai | `Handler` dihapus, snippets dibetulkan, fitur Scalar dijelaskan, API baru didokumentasikan |
 | P2 13 refactor versioning | Terbuka | Hanya `schemaTypeSignature` yang disesuaikan untuk type array 3.1 |
 | P3 14 DocsAuth `?key=` | Terbuka | Misconfig tanpa kredensial kini 500, bukan 401 |
