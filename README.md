@@ -154,7 +154,7 @@ docs := openswag.New(openswag.Config{
         {Name: "Users", Description: "User management"},
     },
     UI: openswag.UIConfig{
-        Theme:          "purple",  // purple, dark, light
+        Theme:          "purple",  // any Scalar theme: purple, moon, solarized, bluePlanet, saturn, kepler, mars, deepSpace, laserwave, alternate, default, none
         DarkMode:       true,
         ShowSidebar:    true,
         ScalarVersion:  "",        // pin a specific @scalar/api-reference release; empty = library default

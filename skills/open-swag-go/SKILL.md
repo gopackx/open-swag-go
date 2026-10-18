@@ -66,7 +66,7 @@ cfg := openswag.Config{
         {Name: "Pets", Description: "Pet management"},
     },
     UI: openswag.UIConfig{
-        Theme:       "purple", // purple / dark / light
+        Theme:       "purple", // Scalar theme name: purple, moon, solarized, bluePlanet, saturn, kepler, mars, deepSpace, laserwave, alternate, default, none
         DarkMode:    true,
         ShowSidebar: true,
         Layout:      "modern",
