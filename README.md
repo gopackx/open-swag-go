@@ -3,8 +3,12 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/gopackx/open-swag-go.svg)](https://pkg.go.dev/github.com/gopackx/open-swag-go)
 [![Go Report Card](https://goreportcard.com/badge/github.com/gopackx/open-swag-go)](https://goreportcard.com/report/github.com/gopackx/open-swag-go)
 [![CI](https://github.com/gopackx/open-swag-go/actions/workflows/ci.yml/badge.svg)](https://github.com/gopackx/open-swag-go/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/gopackx/open-swag-go?sort=semver)](https://github.com/gopackx/open-swag-go/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 A modern OpenAPI documentation package for Go with **decorator-like DX**, similar to `adonis-open-swagger`.
+
+**Documentation:** [open-swaggo.andrianprasetya.com](https://open-swaggo.andrianprasetya.com) — guides, API reference, changelog and migration notes.
 
 ## Features
 
