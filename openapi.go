@@ -435,6 +435,9 @@ func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
 		} else {
 			p.WithSchema(spec.NewSchema("string"))
 		}
+		if param.Example != nil {
+			p.WithExample(param.Example)
+		}
 
 		op.AddParameter(p)
 	}

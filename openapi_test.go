@@ -359,3 +359,30 @@ func TestPointerFieldsAreNullable31(t *testing.T) {
 		t.Errorf("nullable any schema should stay empty, got %v", anySchema)
 	}
 }
+
+// Parameter.Example on an explicitly declared parameter must reach the spec.
+func TestExplicitParameterExampleIsEmitted(t *testing.T) {
+	docs := New(Config{Info: Info{Title: "t", Version: "1"}})
+	docs.Add(Endpoint{
+		Method: "GET",
+		Path:   "/items",
+		Parameters: []Parameter{
+			{Name: "page", In: "query", Example: 3},
+			{Name: "q", In: "query"},
+		},
+		Responses: Responses{200: Response("ok")},
+	})
+	m := buildSpecMap(t, docs)
+	params, _ := operation(t, m, "/items", "get")["parameters"].([]interface{})
+	byName := map[string]map[string]interface{}{}
+	for _, p := range params {
+		pm := p.(map[string]interface{})
+		byName[pm["name"].(string)] = pm
+	}
+	if byName["page"]["example"] != float64(3) {
+		t.Errorf("expected example 3 on page, got %v", byName["page"])
+	}
+	if _, has := byName["q"]["example"]; has {
+		t.Errorf("q must not have an example: %v", byName["q"])
+	}
+}
