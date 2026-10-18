@@ -163,12 +163,12 @@ type audit struct {
 	By string `json:"by"`
 }
 
-type secretID string
+type secretID string //nolint:unused // embedded below only to prove unexported non-struct fields are skipped
 
 type withEmbedded struct {
 	base
 	*audit
-	secretID        // unexported non-struct embedded: skipped
+	secretID        //nolint:unused // unexported non-struct embedded: must be skipped by fromStruct
 	Name     string `json:"name"`
 }
 
