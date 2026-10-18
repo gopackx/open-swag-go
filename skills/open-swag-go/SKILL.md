@@ -2,7 +2,7 @@
 
 ---
 name: open-swag-go
-description: Use this skill when integrating gopackx/open-swag-go (a Go library that generates an OpenAPI 3.x spec from struct-tagged endpoint definitions and serves a Scalar-powered docs UI) into a Go project. Triggers include any of these in a Go context — adding "OpenAPI docs" / "Swagger UI" / "API documentation" / "interactive API explorer" to a Go service; defining endpoints with decorator-style co-located doc structs; generating schemas from existing DTO/request/response structs (json/form/swagger/validate/binding tags); mounting docs on net/http, Chi, Gin, Echo, or Fiber; configuring auth schemes (Bearer JWT, API key, basic, cookie, OAuth2) for the spec and try-it console; exporting openapi.json to feed openapi-typescript / openapi-fetch / orval frontends; detecting breaking changes between two spec versions. Use also for upgrading an existing open-swag-go deployment between versions (v1.1.x → v1.2.0 has one renamed type, see "Common pitfalls"). Do NOT use for: hand-writing OpenAPI YAML, swag/swaggo (a different annotation-comment library), non-Go projects, or runtime request validation (this library generates docs, not middleware).
+description: Use this skill when integrating gopackx/open-swag-go (a Go library that generates an OpenAPI 3.x spec from struct-tagged endpoint definitions and serves a Scalar-powered docs UI) into a Go project. Triggers include any of these in a Go context — adding "OpenAPI docs" / "Swagger UI" / "API documentation" / "interactive API explorer" to a Go service; defining endpoints with decorator-style co-located doc structs; generating schemas from existing DTO/request/response structs (json/form/swagger/validate/binding tags); mounting docs on net/http, Chi, Gin, Echo, or Fiber; configuring auth schemes (Bearer JWT, API key, basic, cookie, OAuth2) for the spec and try-it console; exporting openapi.json to feed openapi-typescript / openapi-fetch / orval frontends; detecting breaking changes between two spec versions. Use also for upgrading an existing open-swag-go deployment between versions (v1.1.x → v1.2.0 has one renamed type; v1.2.0 → v1.3.0 removes unused packages and changes the spec output, see "Common pitfalls"). Do NOT use for: hand-writing OpenAPI YAML, swag/swaggo (a different annotation-comment library), non-Go projects, or runtime request validation (this library generates docs, not middleware).
 ---
 
 `github.com/gopackx/open-swag-go` turns Go struct definitions into an OpenAPI 3.x spec and serves a Scalar-powered interactive docs UI. The core code imports only the standard library, but the module currently requires gin, chi, echo and fiber in `go.mod` (used by the adapter subpackages), so `go get` pulls them into your module graph; framework adapters are opt-in subpackages.
@@ -33,10 +33,10 @@ Confirm fit before suggesting it:
 
 ## Step 1 — Install
 
-Pin to `v1.2.0` or later — earlier releases have four bugs that produce wrong specs at runtime (self-referential struct stack overflow, ignored `RequestBody.ContentType`, silent `http-bearer` fallback for unknown security schemes, dormant `BreakingTypeChanged` in version diff). See "Common pitfalls" for details.
+Pin to `v1.3.0` or later. v1.3.0 emits named structs as `components.schemas` `$ref`s, writes nullable fields as OpenAPI 3.1 type arrays, generates `operationId`s, adds `Docs.Validate()`, and removes the never-used `pkg/auth` and `pkg/tryit` packages. Releases before v1.2.0 also have four bugs that produce wrong specs at runtime (self-referential struct stack overflow, ignored `RequestBody.ContentType`, silent `http-bearer` fallback for unknown security schemes, dormant `BreakingTypeChanged` in version diff). See "Common pitfalls" for details.
 
 ```bash
-go get github.com/gopackx/open-swag-go@v1.2.0
+go get github.com/gopackx/open-swag-go@v1.3.0
 ```
 
 No separate adapter install is needed — the framework adapters live in subpackages of the same module (`/adapters/chi`, `/adapters/gin`, `/adapters/echo`, `/adapters/fiber`, `/adapters/nethttp`) and come along automatically.
