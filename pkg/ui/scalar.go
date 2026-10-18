@@ -1,13 +1,42 @@
 package ui
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
+	"html/template"
 	"strings"
 )
 
 //go:embed templates/scalar.html
 var scalarTemplate string
+
+// DefaultScalarVersion is the @scalar/api-reference release loaded from the
+// CDN when ScalarConfig.ScalarVersion is empty. It is pinned so that upstream
+// releases do not silently change the docs UI for every user.
+const DefaultScalarVersion = "1.75.0"
+
+// scalarHTMLTemplate is the embedded template with its {{PLACEHOLDER}} markers
+// rewritten to html/template actions, so every value is escaped for the
+// context it appears in (HTML text, JS string, URL, CSS).
+var scalarHTMLTemplate = template.Must(template.New("scalar").Parse(
+	strings.NewReplacer(
+		"{{TITLE}}", "{{.Title}}",
+		"{{SPEC_URL}}", "{{.SpecURL}}",
+		"{{CONFIG}}", "{{.Config}}",
+		"{{CUSTOM_CSS}}", "{{.CustomCSS}}",
+		"{{SCALAR_VERSION}}", "{{.ScalarVersion}}",
+	).Replace(scalarTemplate),
+))
+
+// scalarTemplateData is the data passed to scalarHTMLTemplate.
+type scalarTemplateData struct {
+	Title         string
+	SpecURL       string
+	Config        template.JS
+	CustomCSS     template.CSS
+	ScalarVersion string
+}
 
 // ScalarConfig configures the Scalar UI
 type ScalarConfig struct {
@@ -18,17 +47,23 @@ type ScalarConfig struct {
 	SearchHotKey      string   `json:"searchHotKey,omitempty"`
 	HiddenClients     []string `json:"hiddenClients,omitempty"`
 	DefaultHTTPClient string   `json:"defaultHttpClient,omitempty"`
-	CustomCSS         string   `json:"-"`
+	// CustomCSS is inserted verbatim into a <style> element. It must come
+	// from a trusted source (developer configuration).
+	CustomCSS string `json:"-"`
+	// ScalarVersion selects the @scalar/api-reference version loaded from the
+	// CDN. Empty means DefaultScalarVersion.
+	ScalarVersion string `json:"-"`
 }
 
 // DefaultScalarConfig returns the default Scalar configuration
 func DefaultScalarConfig() ScalarConfig {
 	return ScalarConfig{
-		Theme:        "purple",
-		Layout:       "modern",
-		DarkMode:     true,
-		ShowSidebar:  true,
-		SearchHotKey: "k",
+		Theme:         "purple",
+		Layout:        "modern",
+		DarkMode:      true,
+		ShowSidebar:   true,
+		SearchHotKey:  "k",
+		ScalarVersion: DefaultScalarVersion,
 	}
 }
 
@@ -41,6 +76,9 @@ type Scalar struct {
 
 // NewScalar creates a new Scalar UI instance
 func NewScalar(specURL, title string, config ScalarConfig) *Scalar {
+	if config.ScalarVersion == "" {
+		config.ScalarVersion = DefaultScalarVersion
+	}
 	return &Scalar{
 		config:  config,
 		specURL: specURL,
@@ -50,23 +88,30 @@ func NewScalar(specURL, title string, config ScalarConfig) *Scalar {
 
 // Render generates the HTML for the Scalar UI
 func (s *Scalar) Render() (string, error) {
+	// encoding/json escapes <, > and & by default, so the JSON is safe to
+	// embed directly in a <script> element.
 	configJSON, err := json.Marshal(s.config)
 	if err != nil {
 		return "", err
 	}
 
-	html := scalarTemplate
-	html = strings.ReplaceAll(html, "{{SPEC_URL}}", s.specURL)
-	html = strings.ReplaceAll(html, "{{CONFIG}}", string(configJSON))
-	html = strings.ReplaceAll(html, "{{TITLE}}", s.title)
-
-	if s.config.CustomCSS != "" {
-		html = strings.ReplaceAll(html, "{{CUSTOM_CSS}}", s.config.CustomCSS)
-	} else {
-		html = strings.ReplaceAll(html, "{{CUSTOM_CSS}}", "")
+	version := s.config.ScalarVersion
+	if version == "" {
+		version = DefaultScalarVersion
 	}
 
-	return html, nil
+	var buf bytes.Buffer
+	err = scalarHTMLTemplate.Execute(&buf, scalarTemplateData{
+		Title:         s.title,
+		SpecURL:       s.specURL,
+		Config:        template.JS(configJSON),
+		CustomCSS:     template.CSS(s.config.CustomCSS),
+		ScalarVersion: version,
+	})
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // SetTheme sets the UI theme

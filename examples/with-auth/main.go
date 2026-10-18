@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"encoding/json"
@@ -112,6 +112,10 @@ func main() {
 	docs.AddAll(LoginDoc, RegisterDoc, ProfileDoc)
 
 	mux := http.NewServeMux()
+	if err := docs.Validate(); err != nil {
+		log.Fatal(err)
+	}
+
 	docs.Mount(mux, "/docs")
 
 	mux.HandleFunc("POST /auth/login", login)

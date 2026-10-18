@@ -1,5 +1,7 @@
 package spec
 
+import "encoding/json"
+
 // Components represents the OpenAPI components object
 type Components struct {
 	Schemas         map[string]*Schema         `json:"schemas,omitempty"`
@@ -14,7 +16,10 @@ type Components struct {
 	PathItems       map[string]*PathItem       `json:"pathItems,omitempty"`
 }
 
-// Schema represents a JSON Schema
+// Schema represents a JSON Schema.
+//
+// Nullable marks the schema as also accepting JSON null. It is never
+// serialised as the OpenAPI 3.0 `nullable` keyword; see MarshalJSON.
 type Schema struct {
 	Ref                  string             `json:"$ref,omitempty"`
 	Type                 string             `json:"type,omitempty"`
@@ -43,6 +48,37 @@ type Schema struct {
 	ReadOnly             bool               `json:"readOnly,omitempty"`
 	WriteOnly            bool               `json:"writeOnly,omitempty"`
 	Deprecated           bool               `json:"deprecated,omitempty"`
+}
+
+// schemaAlias has Schema's fields but not its methods, so marshalling it does
+// not recurse back into Schema.MarshalJSON.
+type schemaAlias Schema
+
+// MarshalJSON renders the schema as OpenAPI 3.1 (JSON Schema 2020-12).
+//
+// OpenAPI 3.1 has no `nullable` keyword. When Nullable is set and the schema
+// has a concrete type, the type is emitted as a two-element array, e.g.
+// {"type": ["string", "null"]}. A nullable schema without a type (the "any"
+// schema) already accepts null, so nothing extra is emitted. $ref schemas are
+// emitted unchanged.
+func (s Schema) MarshalJSON() ([]byte, error) {
+	a := schemaAlias(s)
+	nullable := a.Nullable
+	a.Nullable = false // never emit the 3.0 `nullable` keyword
+
+	if !nullable || a.Type == "" || a.Ref != "" {
+		return json.Marshal(a)
+	}
+
+	typ := a.Type
+	a.Type = ""
+	return json.Marshal(struct {
+		Type []string `json:"type"`
+		schemaAlias
+	}{
+		Type:        []string{typ, "null"},
+		schemaAlias: a,
+	})
 }
 
 // Response represents an OpenAPI response

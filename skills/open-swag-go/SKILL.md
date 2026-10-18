@@ -5,7 +5,7 @@ name: open-swag-go
 description: Use this skill when integrating gopackx/open-swag-go (a Go library that generates an OpenAPI 3.x spec from struct-tagged endpoint definitions and serves a Scalar-powered docs UI) into a Go project. Triggers include any of these in a Go context — adding "OpenAPI docs" / "Swagger UI" / "API documentation" / "interactive API explorer" to a Go service; defining endpoints with decorator-style co-located doc structs; generating schemas from existing DTO/request/response structs (json/form/swagger/validate/binding tags); mounting docs on net/http, Chi, Gin, Echo, or Fiber; configuring auth schemes (Bearer JWT, API key, basic, cookie, OAuth2) for the spec and try-it console; exporting openapi.json to feed openapi-typescript / openapi-fetch / orval frontends; detecting breaking changes between two spec versions. Use also for upgrading an existing open-swag-go deployment between versions (v1.1.x → v1.2.0 has one renamed type, see "Common pitfalls"). Do NOT use for: hand-writing OpenAPI YAML, swag/swaggo (a different annotation-comment library), non-Go projects, or runtime request validation (this library generates docs, not middleware).
 ---
 
-`github.com/gopackx/open-swag-go` turns Go struct definitions into an OpenAPI 3.x spec and serves a Scalar-powered interactive docs UI. The core depends only on stdlib; framework adapters are opt-in subpackages.
+`github.com/gopackx/open-swag-go` turns Go struct definitions into an OpenAPI 3.x spec and serves a Scalar-powered interactive docs UI. The core code imports only the standard library, but the module currently requires gin, chi, echo and fiber in `go.mod` (used by the adapter subpackages), so `go get` pulls them into your module graph; framework adapters are opt-in subpackages.
 
 This skill walks you through integrating it correctly the first time and lists the pitfalls that cause most early issues.
 
@@ -349,6 +349,24 @@ These are the issues real users hit on the first integration:
     `BuildSpec()` and then add another endpoint, your mutations are
     lost on the rebuild. Prefer `Config.Auth.Schemes` over post-build
     `openapi.AddSecurityScheme(...)`.
+
+12. **Silent duplicate routes / unknown methods (fixed after v1.2.0).**
+    `Add` never fails. A second `GET /users/{id}` used to overwrite the
+    first and `HEAD`/`OPTIONS` produced an empty path item. Call
+    `docs.Validate()` once after `AddAll` and treat an error as fatal: it
+    reports duplicate method+path pairs, unsupported methods and
+    colliding `operationId`s.
+
+13. **`operationId` is generated; orval needs it.** Each operation gets
+    `method + path` in lowerCamelCase (`GET /users/{id}` →
+    `getUsersById`). Override with `Endpoint.OperationID` when two routes
+    would collide or when the frontend wants a specific function name.
+
+14. **Pointers are nullable, emitted 3.1-style.** `Name *string` becomes
+    `"type": ["string","null"]` (not the 3.0 `nullable: true`), so
+    openapi-typescript yields `string | null`. Router-style paths
+    (`/users/:id`) are normalised to `{id}`; embedded structs with an
+    unexported type name are flattened like `encoding/json` does.
 
 ---
 

@@ -199,6 +199,10 @@ func main() {
 	)
 
 	mux := http.NewServeMux()
+	if err := docs.Validate(); err != nil {
+		log.Fatal(err)
+	}
+
 	docs.Mount(mux, "/docs")
 
 	mux.HandleFunc("POST /products", createProduct)

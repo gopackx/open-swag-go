@@ -105,4 +105,3 @@ func StagingServer(url string) Server {
 		Description: "Staging server",
 	}
 }
-

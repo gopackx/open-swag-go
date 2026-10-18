@@ -17,6 +17,14 @@ func (d *Docs) basicAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		if d.config.DocsAuth.APIKey == "" &&
+			(d.config.DocsAuth.Username == "" || d.config.DocsAuth.Password == "") {
+			// Misconfiguration: fail loudly instead of locking everyone out
+			// with a 401 that looks like a wrong password.
+			http.Error(w, "DocsAuth enabled but no credentials configured", http.StatusInternalServerError)
+			return
+		}
+
 		// Option 1: API Key in query param (?key=xxx)
 		if d.config.DocsAuth.APIKey != "" {
 			key := r.URL.Query().Get("key")
@@ -59,11 +67,12 @@ func (d *Docs) unauthorized(w http.ResponseWriter) {
 func (d *Docs) Handler() http.HandlerFunc {
 	return d.basicAuth(func(w http.ResponseWriter, r *http.Request) {
 		config := ui.ScalarConfig{
-			Theme:       d.config.UI.Theme,
-			Layout:      d.config.UI.Layout,
-			DarkMode:    d.config.UI.DarkMode,
-			ShowSidebar: d.config.UI.ShowSidebar,
-			CustomCSS:   d.config.UI.CustomCSS,
+			Theme:         d.config.UI.Theme,
+			Layout:        d.config.UI.Layout,
+			DarkMode:      d.config.UI.DarkMode,
+			ShowSidebar:   d.config.UI.ShowSidebar,
+			CustomCSS:     d.config.UI.CustomCSS,
+			ScalarVersion: d.config.UI.ScalarVersion,
 		}
 
 		scalar := ui.NewScalar("./openapi.json", d.config.Info.Title, config)
@@ -74,7 +83,8 @@ func (d *Docs) Handler() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(html))
+		// A write error means the client went away; nothing useful to do.
+		_, _ = w.Write([]byte(html))
 	})
 }
 
@@ -88,8 +98,16 @@ func (d *Docs) SpecHandler() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Write(specJSON)
+		switch origin := d.config.UI.SpecCORSOrigin; origin {
+		case "":
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		case "-":
+			// CORS header disabled.
+		default:
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+		// A write error means the client went away; nothing useful to do.
+		_, _ = w.Write(specJSON)
 	})
 }
 

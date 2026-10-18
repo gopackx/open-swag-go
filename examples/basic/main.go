@@ -135,6 +135,10 @@ func main() {
 
 	// Setup routes
 	mux := http.NewServeMux()
+	if err := docs.Validate(); err != nil {
+		log.Fatal(err)
+	}
+
 	docs.Mount(mux, "/docs")
 
 	// API routes

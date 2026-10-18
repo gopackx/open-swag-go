@@ -4,7 +4,6 @@
 *.dll
 *.so
 *.dylib
-dan
 .claude
 
 # Test binary

@@ -71,6 +71,24 @@ func (p *PathItem) SetPatch(op *Operation) *PathItem {
 	return p
 }
 
+// SetHead sets the HEAD operation
+func (p *PathItem) SetHead(op *Operation) *PathItem {
+	p.Head = op
+	return p
+}
+
+// SetOptions sets the OPTIONS operation
+func (p *PathItem) SetOptions(op *Operation) *PathItem {
+	p.Options = op
+	return p
+}
+
+// SetTrace sets the TRACE operation
+func (p *PathItem) SetTrace(op *Operation) *PathItem {
+	p.Trace = op
+	return p
+}
+
 // AddParameter adds a parameter to the path item
 func (p *PathItem) AddParameter(param *Parameter) *PathItem {
 	p.Parameters = append(p.Parameters, param)

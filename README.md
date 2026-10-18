@@ -10,11 +10,11 @@ A modern OpenAPI documentation package for Go with **decorator-like DX**, simila
 
 - 🎨 **Modern UI** - Scalar with dark mode, responsive design
 - 📝 **Struct-based definitions** - Co-located with handlers (like decorators)
-- 🔐 **Auth playground** - Bearer, API Key, Basic, Cookie auth
-- 🧪 **Try-it console** - Built-in API tester
+- 🔐 **Auth schemes** - Bearer, API Key, Basic, Cookie security schemes in the generated spec
+- 🧪 **Try-it console & auth playground (via Scalar)** - provided by the bundled Scalar UI, not implemented by this library
 - 📊 **Auto examples** - Smart example generation from structs
 - 🔄 **Framework adapters** - Chi, Gin, Echo, Fiber
-- 📋 **Code snippets** - curl, JavaScript, Go, Python, PHP
+- 📋 **Code snippets (via Scalar)** - shown in the Scalar UI; a standalone `pkg/tryit/snippets` generator (curl, JavaScript, Go, Python) is also available
 - ⚠️ **Version diff** - Breaking change detection
 
 ## Installation
@@ -78,7 +78,7 @@ func main() {
 
 ## Co-located Swagger Definitions
 
-Define swagger docs next to your handlers — like decorators in other languages:
+Define swagger docs in the same file as your handlers — like decorators in other languages. The `Endpoint` only describes the operation; you still register the handler with your router yourself:
 
 ```go
 // handlers/user.go
@@ -99,7 +99,6 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 var CreateUserDoc = openswag.Endpoint{
     Method:      "POST",
     Path:        "/users",
-    Handler:     CreateUser,
     Summary:     "Create a new user",
     Tags:        []string{"Users"},
     RequestBody: openswag.Body(dto.CreateUserRequest{}),
@@ -114,11 +113,25 @@ var CreateUserDoc = openswag.Endpoint{
 var Endpoints = []openswag.Endpoint{CreateUserDoc}
 ```
 
-Then register:
+Then register, and validate once at startup so duplicate routes, unsupported
+HTTP methods and colliding `operationId`s fail fast instead of silently
+producing a wrong spec:
 
 ```go
 docs.AddAll(handlers.Endpoints...)
+if err := docs.Validate(); err != nil {
+    log.Fatal(err)
+}
 ```
+
+Paths may be written in OpenAPI style (`/users/{id}`) or router style
+(`/users/:id`, `/files/*path`); router-style segments are normalised to
+`{name}` in the generated spec.
+
+Every operation gets an `operationId`. By default it is derived from the method
+and path (`GET /users/{id}` becomes `getUsersById`), which is what
+openapi-typescript, openapi-fetch and orval use to name generated functions.
+Set `Endpoint.OperationID` to override it.
 
 ## Configuration
 
@@ -141,9 +154,11 @@ docs := openswag.New(openswag.Config{
         {Name: "Users", Description: "User management"},
     },
     UI: openswag.UIConfig{
-        Theme:       "purple",  // purple, dark, light
-        DarkMode:    true,
-        ShowSidebar: true,
+        Theme:          "purple",  // purple, dark, light
+        DarkMode:       true,
+        ShowSidebar:    true,
+        ScalarVersion:  "",        // pin a specific @scalar/api-reference release; empty = library default
+        SpecCORSOrigin: "",        // "" = "*", "-" = no CORS header, or an explicit origin
     },
     Auth: openswag.AuthConfig{
         PersistCredentials: true,
@@ -213,11 +228,31 @@ type CreateUserRequest struct {
 Supported tags:
 - `swagger:"required"` - Mark as required
 - `swagger:"format=email"` - Set format
-- `example:"value"` - Example value
+- `example:"value"` - Example value (coerced to the field type)
 - `description:"text"` - Field description
 - `format:"uuid"` - Format hint
-- `validate:"required"` - validator library
-- `binding:"required"` - Gin binding
+- `enum:"a,b,c"` - Explicit enum values
+- `validate:"..."` / `binding:"..."` - go-playground/validator rules (see below)
+
+Validator rules are mapped onto JSON Schema constraints:
+
+| Rule | string | number | slice |
+|------|--------|--------|-------|
+| `required` | required | required | required |
+| `oneof=a b c` | `enum` | `enum` (typed) | - |
+| `min=N` / `gte=N` | `minLength` | `minimum` | `minItems` |
+| `max=N` / `lte=N` | `maxLength` | `maximum` | `maxItems` |
+| `len=N` | both | - | both |
+| `email`, `uuid`, `url`, `ipv4`, `ipv6`, `hostname` | `format` | - | - |
+| `dive,<rules>` | - | - | rules apply to `items` |
+
+Only a bare `required` marks a field required; conditional rules such as
+`required_if` do not. Fields with `json:",omitempty"` are never required.
+
+Pointer fields are nullable. Because the spec is OpenAPI 3.1, this is emitted
+as a type array, so `Name *string` becomes `"type": ["string", "null"]` and
+openapi-typescript generates `string | null`. Query and path parameters built
+from a struct treat a pointer as "optional" instead.
 
 ## Framework Adapters
 
@@ -274,18 +309,18 @@ example := gen.Generate(UserResponse{})
 ### Code Snippet Generator
 
 ```go
-import "github.com/gopackx/open-swag-go/pkg/snippets"
+import "github.com/gopackx/open-swag-go/pkg/tryit/snippets"
 
-gen := snippets.New()
+gen := snippets.NewManager()
 req := snippets.Request{
     Method:  "POST",
     URL:     "https://api.example.com/users",
     Headers: map[string]string{"Authorization": "Bearer token"},
-    Body:    map[string]string{"name": "John"},
+    Body:    `{"name": "John"}`,
 }
 
-snippets := gen.GenerateAll(req)
-// Returns: curl, javascript, go, python, php
+all := gen.GenerateAll(req) // map[string]string keyed by language
+// Keys: curl, javascript, go, python
 ```
 
 ### Version Diff (Breaking Change Detection)

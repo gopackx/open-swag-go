@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -461,8 +462,25 @@ func getParamTypes(op map[string]interface{}) map[string]string {
 	return result
 }
 
+// schemaTypeSignature returns "type[/format]" for a schema. OpenAPI 3.1
+// may express a nullable field as a type array such as ["string", "null"];
+// the "null" member is ignored so that merely allowing null (a loosening of
+// the request contract) is not reported as a type change.
 func schemaTypeSignature(schema map[string]interface{}) string {
-	t, _ := schema["type"].(string)
+	var t string
+	switch v := schema["type"].(type) {
+	case string:
+		t = v
+	case []interface{}:
+		var types []string
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "null" {
+				types = append(types, s)
+			}
+		}
+		sort.Strings(types)
+		t = strings.Join(types, "|")
+	}
 	f, _ := schema["format"].(string)
 	if f != "" {
 		return t + "/" + f

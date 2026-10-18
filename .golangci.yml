@@ -1,0 +1,3 @@
+# golangci-lint v1.64 configuration: default linters only.
+run:
+  timeout: 5m

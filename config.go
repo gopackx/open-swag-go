@@ -114,4 +114,12 @@ type UIConfig struct {
 	TagGrouping        bool   `json:"tagGrouping"`
 	CollapsibleSchemas bool   `json:"collapsibleSchemas"`
 	CustomCSS          string `json:"customCss,omitempty"`
+	// ScalarVersion pins the @scalar/api-reference version loaded from the
+	// CDN. Empty means ui.DefaultScalarVersion.
+	ScalarVersion string `json:"scalarVersion,omitempty"`
+	// SpecCORSOrigin controls the Access-Control-Allow-Origin header sent by
+	// SpecHandler. Empty keeps the historical default "*" for backward
+	// compatibility; the literal value "-" disables the header; any other
+	// value is sent as-is (e.g. "https://app.example.com").
+	SpecCORSOrigin string `json:"specCorsOrigin,omitempty"`
 }

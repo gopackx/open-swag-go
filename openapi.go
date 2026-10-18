@@ -2,16 +2,29 @@ package openswag
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/gopackx/open-swag-go/pkg/schema"
 	"github.com/gopackx/open-swag-go/pkg/spec"
 )
 
-// Docs is the main documentation instance
+// Docs is the main documentation instance.
+//
+// Add never fails, so mistakes in endpoint definitions (a method+path
+// registered twice, an unsupported HTTP method) do not surface on their own:
+// BuildSpec keeps the last of duplicate endpoints and skips unsupported
+// methods. Call Validate once at startup, after registering all endpoints,
+// and treat a non-nil error as fatal:
+//
+//	if err := docs.Validate(); err != nil {
+//		log.Fatal(err)
+//	}
 type Docs struct {
 	config    Config
 	endpoints []Endpoint
@@ -21,8 +34,14 @@ type Docs struct {
 
 // Endpoint represents an API endpoint definition
 type Endpoint struct {
-	Method      string
-	Path        string
+	Method string
+	// Path may use OpenAPI style (/users/{id}) or router style (/users/:id,
+	// /files/*path); router-style segments are normalised to {name} in the
+	// generated spec.
+	Path string
+	// OperationID overrides the generated operationId. When empty, one is
+	// derived from the method and path, e.g. GET /users/{id} -> getUsersById.
+	OperationID string
 	Summary     string
 	Description string
 	Tags        []string
@@ -251,7 +270,21 @@ func predefinedScheme(name string) *spec.SecurityScheme {
 	return nil
 }
 
+// supportedMethods are the HTTP methods an OpenAPI 3.1 path item can hold.
+var supportedMethods = map[string]bool{
+	"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true,
+	"HEAD": true, "OPTIONS": true, "TRACE": true,
+}
+
 func (d *Docs) addEndpointToSpec(openapi *spec.OpenAPI, ep Endpoint) {
+	method := strings.ToUpper(strings.TrimSpace(ep.Method))
+	if !supportedMethods[method] {
+		// Reported by Validate; never emit an empty path item.
+		return
+	}
+	ep.Method = method
+	ep.Path = normalizePath(ep.Path)
+
 	pathItem := openapi.Paths[ep.Path]
 	if pathItem == nil {
 		pathItem = spec.NewPathItem()
@@ -259,7 +292,6 @@ func (d *Docs) addEndpointToSpec(openapi *spec.OpenAPI, ep Endpoint) {
 
 	operation := d.buildOperation(ep)
 
-	method := strings.ToUpper(ep.Method)
 	switch method {
 	case "GET":
 		pathItem.SetGet(operation)
@@ -271,13 +303,123 @@ func (d *Docs) addEndpointToSpec(openapi *spec.OpenAPI, ep Endpoint) {
 		pathItem.SetPatch(operation)
 	case "DELETE":
 		pathItem.SetDelete(operation)
+	case "HEAD":
+		pathItem.SetHead(operation)
+	case "OPTIONS":
+		pathItem.SetOptions(operation)
+	case "TRACE":
+		pathItem.SetTrace(operation)
 	}
 
 	openapi.AddPath(ep.Path, pathItem)
 }
 
+// Validate checks the registered endpoints for definitions that cannot be
+// represented faithfully in the spec. It reports, in one joined error:
+//   - every method+path pair registered more than once (compared after
+//     upper-casing the method and normalising /users/:id to /users/{id});
+//   - every endpoint whose method is not an OpenAPI method (GET, POST, PUT,
+//     PATCH, DELETE, HEAD, OPTIONS, TRACE);
+//   - every operationId (explicit or generated) used by more than one
+//     operation, since OpenAPI requires operationIds to be unique.
+//
+// It returns nil when all definitions are valid. Call it once at startup.
+func (d *Docs) Validate() error {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var errs []error
+	routes := make(map[string]int)       // "METHOD path" -> first endpoint index
+	operationIDs := make(map[string]int) // operationId -> first endpoint index
+
+	for i, ep := range d.endpoints {
+		method := strings.ToUpper(strings.TrimSpace(ep.Method))
+		path := normalizePath(ep.Path)
+
+		if !supportedMethods[method] {
+			errs = append(errs, fmt.Errorf("openswag: endpoint #%d %q %s: unsupported HTTP method", i, ep.Method, path))
+			continue
+		}
+
+		key := method + " " + path
+		if first, dup := routes[key]; dup {
+			errs = append(errs, fmt.Errorf("openswag: duplicate endpoint %s (endpoints #%d and #%d)", key, first, i))
+			continue
+		}
+		routes[key] = i
+
+		opID := ep.OperationID
+		if opID == "" {
+			opID = generateOperationID(method, path)
+		}
+		if first, dup := operationIDs[opID]; dup {
+			errs = append(errs, fmt.Errorf("openswag: duplicate operationId %q (endpoints #%d and #%d); set Endpoint.OperationID to disambiguate", opID, first, i))
+			continue
+		}
+		operationIDs[opID] = i
+	}
+
+	return errors.Join(errs...)
+}
+
+// normalizePath converts router-style path parameters to OpenAPI style:
+// "/users/:id" -> "/users/{id}", "/files/*path" -> "/files/{path}", and drops
+// chi-style regex constraints: "/users/{id:[0-9]+}" -> "/users/{id}".
+func normalizePath(path string) string {
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		switch {
+		case len(part) > 1 && (part[0] == ':' || part[0] == '*'):
+			parts[i] = "{" + part[1:] + "}"
+		case strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}"):
+			if name, _, found := strings.Cut(part[1:len(part)-1], ":"); found {
+				parts[i] = "{" + name + "}"
+			}
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+// generateOperationID derives a lowerCamelCase operationId from a method and
+// a normalised path: GET /users/{id}/orders -> getUsersByIdOrders.
+// Non-alphanumeric characters act as word separators and are dropped.
+func generateOperationID(method, path string) string {
+	var b strings.Builder
+	b.WriteString(strings.ToLower(method))
+
+	wrote := false
+	for _, seg := range strings.Split(path, "/") {
+		if seg == "" {
+			continue
+		}
+		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
+			b.WriteString("By")
+			seg = seg[1 : len(seg)-1]
+		}
+		words := strings.FieldsFunc(seg, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		})
+		for _, word := range words {
+			r := []rune(word)
+			r[0] = unicode.ToUpper(r[0])
+			b.WriteString(string(r))
+			wrote = true
+		}
+	}
+	if !wrote {
+		b.WriteString("Root")
+	}
+	return b.String()
+}
+
 func (d *Docs) buildOperation(ep Endpoint) *spec.Operation {
+	operationID := ep.OperationID
+	if operationID == "" {
+		operationID = generateOperationID(ep.Method, ep.Path)
+	}
+
 	op := spec.NewOperation(ep.Summary).
+		WithOperationID(operationID).
 		WithDescription(ep.Description).
 		WithTags(ep.Tags...).
 		SetDeprecated(ep.Deprecated)
@@ -423,30 +565,32 @@ func (d *Docs) buildParamsFromStruct(v interface{}, location string) []*spec.Par
 			continue
 		}
 
-		// Build schema from field type using reflect.Type directly
+		// Build schema from field type, then apply the same tag rules used
+		// for body schemas (description, format, example, swagger tag,
+		// validator constraints, enum).
 		fieldSchema := schema.FromReflectType(field.Type)
-		specSchema := convertSchema(fieldSchema)
+		// A pointer here means "optional", not "may be null": a query or path
+		// parameter cannot carry a JSON null.
+		fieldSchema.Nullable = false
+		schema.ParseFieldTags(field, fieldSchema)
 
-		// Get description and example from tags
-		description := field.Tag.Get("description")
+		// Description and example live on the parameter object rather than
+		// being duplicated inside its schema.
+		description := fieldSchema.Description
 		if description == "" {
 			description = field.Tag.Get("doc")
 		}
+		example := fieldSchema.Example
+		fieldSchema.Description = ""
+		fieldSchema.Example = nil
 
 		p := spec.NewParameter(name, location).
 			WithDescription(description).
-			WithSchema(specSchema)
+			WithSchema(convertSchema(fieldSchema)).
+			SetRequired(schema.IsRequired(field))
 
-		// Check if required
-		validate := field.Tag.Get("validate")
-		binding := field.Tag.Get("binding")
-		if strings.Contains(validate, "required") || strings.Contains(binding, "required") {
-			p.SetRequired(true)
-		}
-
-		// Check for example tag with type coercion
-		if example := field.Tag.Get("example"); example != "" {
-			p.WithExample(schema.ConvertExampleToType(example, field.Type))
+		if example != nil {
+			p.WithExample(example)
 		}
 
 		params = append(params, p)
