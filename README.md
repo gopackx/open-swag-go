@@ -8,7 +8,7 @@
 
 A modern OpenAPI documentation package for Go with **decorator-like DX**, similar to `adonis-open-swagger`.
 
-**Documentation:** [open-swaggo.andrianprasetya.com](https://open-swaggo.andrianprasetya.com) — guides, API reference, changelog and migration notes.
+**Documentation:** [open-swaggo.gopackx.me](https://open-swaggo.gopackx.me) — guides, API reference, changelog and migration notes.
 
 ## Features
 
